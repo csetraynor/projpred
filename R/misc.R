@@ -115,7 +115,7 @@ bootstrap <- function(x, fun = mean, b = 1000, oobfun = NULL, seed = NULL, ...) 
 
 # from rstanarm
 `%ORifNULL%` <- function(a, b) if (is.null(a)) b else a
-
+`%notin%` <- Negate(`%in%`)
 
 .is.wholenumber <- function(x) abs(x - round(x)) < .Machine$double.eps^0.5
 
@@ -202,8 +202,13 @@ bootstrap <- function(x, fun = mean, b = 1000, oobfun = NULL, seed = NULL, ...) 
       }
     }
   } else if (NCOL(y) == 2) {
-    weights <- y[, 2]
-    y <- y[, 1]
+    if(class(y) == "Surv"){
+      y <- as.matrix(y)
+      weights <- rep(1.0, nrow(y))
+    } else {
+      weights <- y[, 2]
+      y <- y[, 1]
+    }
   } else {
     stop("y cannot have more than two columns.")
   }
@@ -239,11 +244,17 @@ bootstrap <- function(x, fun = mean, b = 1000, oobfun = NULL, seed = NULL, ...) 
   set.seed(seed)
 
   family <- refmodel$family
+  is_survfam <- is_surv_family(family)
+  if(is_survfam){
+    family <- family$latent_factor
+    refmodel$intercept <- FALSE
+  }
   S <- NCOL(refmodel$mu) # number of draws in the reference model
 
   if (!is.null(nc)) {
     # use clustering (ignore ns argument)
     if (nc == 1) {
+      
       # special case, only one cluster
       cl <- rep(1, S)
       p_ref <- .get_p_clust(family, refmodel$mu, refmodel$dis, wobs = refmodel$wobs, cl = cl)
@@ -427,6 +438,16 @@ nlist <- function(...) {
   }
   dots
 }
+
+is_surv_family <- function(x){
+  if(is.character(x$family)){
+    grepl("surv", x$family)
+  } else {
+    grepl("surv", x$family$family)
+  }
+
+}
+
 
 ## ifelse operator
 "%||%" <- function(x, y) {

@@ -41,7 +41,6 @@ project_submodel <- function(vind, p_ref, refmodel, family, intercept, regul = 1
   ## capture.output(proj_refit <- refmodel$mle(flatten_formula(subset$formula),
   ##                                           subset$data),
   ##                type = "message")
-
   ## capture.output(proj_refit <- iterative_weighted_least_squares(
   ##   flatten_formula(subset$formula), refmodel$fetch_data(), 3, link,
   ##   replace_response, wprev = wobs, mle = mle),
@@ -51,7 +50,35 @@ project_submodel <- function(vind, p_ref, refmodel, family, intercept, regul = 1
     replace_response,
     wprev = wobs, mle = mle, linear_predict = linear_predict
   )
-  musub <- family$mu_fun(proj_refit, offset = refmodel$offset, weights = wobs)
+  
+  if(class(proj_refit) == "lm") {
+    musub <- family$mu_fun(proj_refit, offset = refmodel$offset, weights = wobs)
+  } else if(class(proj_refit) == "ridgelm") {
+    d_train <- .get_traindata(refmodel)
+    x <- d_train$x
+    if (intercept) {
+      # add vector of ones to x and transform the variable indices
+      x <- cbind(1, x)
+      colnames(x) <- c("1", colnames(x)[-1])
+      if( "1" %notin% vind )
+        vind <- c("1", vind)
+    }
+    xp <- x[, match(vind, colnames(x) ) , drop = F]
+    musub <- family$linkinv( xp %*% as.matrix(proj_refit) ) 
+  } else {
+
+    d_train <- .get_traindata(refmodel)
+    x <- d_train$x
+    if (intercept) {
+      # add vector of ones to x and transform the variable indices
+      x <- cbind(1, x)
+      colnames(x) <- c("1", colnames(x)[-1])
+      if( "1" %notin% vind )
+        vind <- c("1", vind)
+    }
+    xp <- x[, match(vind, colnames(x) ) , drop = F]
+    musub <- family$linkinv( sapply(proj_refit, function(beta) xp %*% as.matrix(beta) ) )
+  }
   if (family$family == "gaussian") {
     ref <- list(mu = pobs$z, var = p_ref$var, w = pobs$w)
   } else {
@@ -60,7 +87,7 @@ project_submodel <- function(vind, p_ref, refmodel, family, intercept, regul = 1
   }
 
   dis_sub <- family$dis_fun(ref, list(mu = musub), ref$w)
-  kl <- family$kl(ref, list(weights = wobs), list(mu = musub, dis = dis_sub))
+  kl <- family$kl(ref, list(weights = wobs), list(mu = musub, dis = dis_sub) ) 
   submodel <- list(kl = kl, dis = dis_sub, weights = wsample)
 
   submodel$vind <- vind
@@ -98,7 +125,7 @@ iterative_weighted_least_squares <- function(formula, data, iters, link,
   })
 }
 
-.get_submodels <- function(searchpath, nv, family, p_ref,
+.get_submodels <- function(searchpath, nv, family, p_ref, d_train,
                            refmodel, intercept, regul, cv_search = FALSE) {
   ##
   ##
@@ -107,57 +134,76 @@ iterative_weighted_least_squares <- function(formula, data, iters, link,
   ## no need to project anything anymore, and this function simply fetches the information
   ## from the searchpath list, which contains the parameter values.
   ##
-
+  
   varorder <- searchpath$vind
   p_sel <- searchpath$p_sel
-
   if (!cv_search) {
-    ## simply fetch the already computed quantities for each submodel size
     fetch_submodel <- function(nv) {
       submodel <- list()
       vind <- utils::head(varorder, nv)
-
-      mu_ref <- p_sel$mu
-
-      if (is.null(refmodel$wobs)) {
-        wobs <- rep(1.0, NROW(mu_ref))
-      } else {
-        wobs <- refmodel$wobs
-      }
-
-      if (is.null(p_sel$weights)) {
-        wsample <- rep(1.0, NCOL(mu_ref))
-      } else {
-        wsample <- p_sel$weights
-      }
-
-      wobs <- wobs / sum(wobs)
-      wsample <- wsample / sum(wsample)
-
-      pobs <- pseudo_data(0, mu_ref, family, weights = wobs)
-
-      ## reuse sub_fit as projected during search
-      sub_refit <- searchpath$sub_fits[[nv + 1]]
-
-      ## split b to alpha and beta, add it to submodel and return the result
-      if (family$family == "gaussian") {
-        ref <- list(mu = pobs$z, var = p_sel$var, w = pobs$w)
-      } else {
-        ref <- p_sel
-        ref$w <- rep(0, NROW(mu_ref))
-      }
-
-      mu <- family$mu_fun(sub_refit, offset = refmodel$offset, weights = wobs)
-      submodel$dis <- family$dis_fun(ref, list(mu = mu), ref$w)
-      submodel$kl <- family$kl(
-        ref, list(weights = wobs),
-        list(mu = mu, dis = submodel$dis)
-      )
-      submodel$weights <- wsample
+      w <- searchpath$w[,nv+1,drop=F]
+      alpha <- searchpath$alpha[nv+1]
+      if (nv==0)
+        beta <- matrix(0,nrow=0, ncol=1)
+      else
+        beta <- searchpath$beta[1:nv,nv+1,drop=F]
+      xsub <- d_train$x[, vind, drop = F]
+      mu <- family$mu_fun_proj(xsub, alpha, beta, d_train$offset)
+      submodel$dis <- family$dis_fun(p_sel, list(mu=mu,w=w), d_train$weights)
+      submodel$kl <- weighted.mean(family$kl(p_sel, d_train, list(mu=mu,dis=submodel$dis)), p_sel$weights)
+      submodel$weights <- p_sel$weights
+      submodel$alpha <- alpha
+      submodel$beta <- beta
       submodel$vind <- vind
-      submodel$sub_fit <- sub_refit
+      submodel$intercept <- intercept
       return(submodel)
     }
+    # ## simply fetch the already computed quantities for each submodel size
+    # fetch_submodel <- function(nv) {
+    #   submodel <- list()
+    #   vind <- utils::head(varorder, nv)
+    # 
+    #   mu_ref <- p_sel$mu
+    # 
+    #   if (is.null(refmodel$wobs)) {
+    #     wobs <- rep(1.0, NROW(mu_ref))
+    #   } else {
+    #     wobs <- refmodel$wobs
+    #   }
+    # 
+    #   if (is.null(p_sel$weights)) {
+    #     wsample <- rep(1.0, NCOL(mu_ref))
+    #   } else {
+    #     wsample <- p_sel$weights
+    #   }
+    # 
+    #   wobs <- wobs / sum(wobs)
+    #   wsample <- wsample / sum(wsample)
+    # 
+    #   pobs <- pseudo_data(0, mu_ref, family, weights = wobs)
+    # 
+    #   ## reuse sub_fit as projected during search
+    #   sub_refit <- searchpath$sub_fits[[nv + 1]]
+    # 
+    #   ## split b to alpha and beta, add it to submodel and return the result
+    #   if (family$family == "gaussian") {
+    #     ref <- list(mu = pobs$z, var = p_sel$var, w = pobs$w)
+    #   } else {
+    #     ref <- p_sel
+    #     ref$w <- rep(0, NROW(mu_ref))
+    #   }
+    # 
+    #   mu <- family$mu_fun(sub_refit, offset = refmodel$offset, weights = wobs)
+    #   submodel$dis <- family$dis_fun(ref, list(mu = mu), ref$w)
+    #   submodel$kl <- family$kl(
+    #     ref, list(weights = wobs),
+    #     list(mu = mu, dis = submodel$dis)
+    #   )
+    #   submodel$weights <- wsample
+    #   submodel$vind <- vind
+    #   submodel$sub_fit <- sub_refit
+    #   return(submodel)
+    # }
   } else {
     ## need to project again for each submodel size
     projfun <- .get_proj_handle(family, regul)

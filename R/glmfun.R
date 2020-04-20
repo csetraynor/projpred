@@ -55,12 +55,18 @@ pseudo_data <- function(f, y, family, offset=rep(0,NROW(f)), weights=rep(1.0,NRO
     loss <- 0.5*sum(family$deviance(mu, y, weights, sqrt(s2))) # ADD 0.5* HERE!!!
     grad <- weights*(mu-y)/(nu*s2) * (nu+1)/(1+(y-mu)^2/(nu*s2)) * dmu_df
 
-  } else if (family$family %in% c('gaussian','poisson','binomial')) {
+  } else if (family$family %in% c('gaussian','poisson','binomial') )  {
     # exponential family distributions
     w <- (weights * dmu_df^2)/family$variance(mu) # 2* because of deviance
     loss <- 0.5*sum(family$deviance(mu, y, weights))
     grad <- -w*(z-f)
-
+    
+  } else if ( is_surv_family(family) ) {
+    # survival family distributions
+    w <- (weights * dmu_df^2)/family$variance(mu) # 2* because of deviance
+    loss <- 0.5*sum(family$deviance(mu, y, weights))
+    grad <- -w*(z-f)
+    
   } else {
     stop(sprintf('Don\'t know how to compute quadratic approximation and gradients for family \'%s\'.',
                  family$family))
@@ -325,4 +331,10 @@ glm_forward <- function(x, y, family=gaussian(), lambda=0, thresh=1e-7, qa_updat
   beta0 <- beta0 - colSums(transf$shift*beta)
 
   return(list( beta=beta, beta0=beta0, varorder=as.vector(path[[3]])+1, w=cbind(nullmodel$w, path[[4]]) ))
+}
+
+logistic <- function (x)  {
+  p <- 1/(1 + exp(-x))
+  p <- ifelse(x == Inf, 1, p)
+  p
 }

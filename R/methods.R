@@ -367,7 +367,6 @@ varsel_stats <- function(object, nv_max = NULL, stats = "elpd", type = c("mean",
                          deltas = F, alpha = 0.32, baseline = NULL, ...) {
   .validate_vsel_object_stats(object, stats)
   baseline <- .validate_baseline(object$refmode, baseline, deltas)
-
   ## fetch statistics
   if (deltas) {
     nfeat_baseline <- .get_nfeat_baseline(object, baseline, stats[1])
@@ -496,7 +495,8 @@ print.cvsel <- function(x, digits = 2, ...) {
 ##'
 ##' }
 ##'
-
+stat = "elpd"; alpha = 0.32; pct = 0.0; type = "upper";
+baseline = NULL; warnings = TRUE
 ##' @export
 suggest_size <- function(object, stat = "elpd", alpha = 0.32, pct = 0.0, type = "upper",
                          baseline = NULL, warnings = TRUE, ...) {
@@ -557,7 +557,8 @@ as.matrix.projection <- function(x, ...) {
       "clustering and the clusters might have different weights."
     ))
   }
-  res <- t(x$sub_fit)
+  #res <- t(x$sub_fit)
+  res <- cbind(x$alpha, t(x$beta))
   if (x$intercept) {
     if ("1" %in% x$vind) {
       colnames(res) <- gsub("^1", "Intercept", x$vind)

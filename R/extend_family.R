@@ -22,6 +22,7 @@ extend_family <- function(family) {
 
 extend_family_binomial <- function(family) {
   kl_dev <- function(pref, data, psub) {
+    pref$mu <- logistic(pref$mu)
     if (NCOL(pref$mu) > 1) {
       w <- rep(data$weights, NCOL(pref$mu))
       colMeans(family$dev.resids(pref$mu, psub$mu, w)) / 2
@@ -34,6 +35,7 @@ extend_family_binomial <- function(family) {
     0
   }
   ll_binom <- function(mu, dis, y, weights = 1) {
+    mu <- logistic(mu)
     dbinom(y, weights, mu, log = TRUE)
   }
   dev_binom <- function(mu, y, weights = 1, dis = NULL) {
@@ -42,7 +44,32 @@ extend_family_binomial <- function(family) {
     }
     -2 * weights * (y * log(mu) + (1 - y) * log(1 - mu))
   }
-  ppd_binom <- function(mu, dis, weights = 1) rbinom(length(mu), weights, mu)
+  ppd_binom <- function(mu, dis, weights = 1) {
+   # browser()
+    mu <- logistic(mu)
+    rbinom(length(mu), weights, mu)
+  } 
+  
+  linkfun <- function(mu){
+    p <- 1/(1 + exp(-mu))
+    p <- ifelse(mu == Inf, 1, p)
+    p
+  }
+  
+  mu_fun <- function(fit, obs = folds, xnew = NULL, offset = NULL,
+           weights = NULL) {
+    if (is.null(offset)) {
+      offset <- rep(0, length(obs))
+    }
+    if (is.null(weights)) {
+      weights <- rep(1, length(obs))
+    }
+    newdata <- fetch_data_wrapper(obs = obs, newdata = xnew)
+    family$linkinv(proj_predfun(fit,
+                                newdata = newdata,
+                                weights = weights
+    ) + offset)
+  }
 
   family$kl <- kl_dev
   family$dis_fun <- dis_na
@@ -50,6 +77,8 @@ extend_family_binomial <- function(family) {
   family$ll_fun <- ll_binom
   family$deviance <- dev_binom
   family$ppd <- ppd_binom
+  family$linkfun <- linkfun
+  family$mu_fun <- mu_fun
 
   return(family)
 }
@@ -115,13 +144,20 @@ extend_family_gaussian <- function(family) {
     -2 * weights * (-0.5 / dis * (y - mu)^2 - log(dis))
   }
   ppd_gauss <- function(mu, dis, weights = 1) rnorm(length(mu), mu, dis)
-
+  
+  mu_fun_proj <- function(x, alpha, beta, offset) {
+    if (!is.matrix(x)) stop('x must be a matrix.')
+    if (!is.matrix(beta)) stop('beta must be a matrix')
+    family$linkinv(cbind(1, x) %*% rbind(alpha, beta) + offset)
+  }
+  
   family$kl <- kl_gauss
   family$dis_fun <- dis_gauss
   family$predvar <- predvar_gauss
   family$ll_fun <- ll_gauss
   family$deviance <- dev_gauss
   family$ppd <- ppd_gauss
+  family$mu_fun_proj <- mu_fun_proj
 
   return(family)
 }
@@ -207,6 +243,107 @@ extend_family_Student_t <- function(family) {
   family$ppd <- ppd_student_t
 
   return(family)
+}
+
+.get_latent_factor_family <- function(){
+  latent_factor_family <- rstanarm:::validate_family("gaussian")
+  extend_family_gaussian(latent_factor_family)
+}
+
+extend_family_surv_weibull <- function(family) {
+  
+  latent_factor_family <- .get_latent_factor_family()
+  
+  kl_surv_weibull <- function(pref, data, psub)
+    colSums( abs( (exp(psub$latent_factor - pref$latent_factor) - 1) / (exp(psub$latent_factor - pref$latent_factor) + 1) ) )
+  dis_na <- function(pref, psub, wobs = 1) rep(0, ncol(pref$mu))
+  predvar_surv_weibull <- function(mu, shape, wsample = 1) {
+    exp(-mu/shape) # trasnforms parametric proportional hazard to extreme AFT 
+  }
+  ll_surv_weibull <- function(basehaz, aux , alpha, time, status, eta) {
+      args <- list(basehaz   = basehaz,
+                   aux       = aux,
+                   intercept = alpha)
+      args$times <- time
+      lhaz  <- do.call(rstanarm:::evaluate_log_basehaz,  args) + eta
+      lsurv <- do.call(rstanarm:::evaluate_log_basesurv, args) * exp(eta)
+      l_lik <- lsurv
+      l_lik[ ,status == 1] <- lhaz[ ,status == 1] + lsurv[ ,status == 1] 
+      l_lik
+  } 
+  dev_surv_weibull <- function(basehaz, aux , alpha, time, status, eta) {
+    args <- list(basehaz   = basehaz,
+                 aux       = aux,
+                 intercept = alpha)
+    args$times <- time
+    lhaz  <- do.call(rstanarm:::evaluate_log_basehaz,  args) + eta
+    lsurv <- do.call(rstanarm:::evaluate_log_basesurv, args) * exp(eta)
+    l_lik <- lsurv
+    l_lik[ ,status == 1] <- lhaz[ ,status == 1] + lsurv[ ,status == 1] 
+    -2*l_lik
+  } 
+  ppd_surv_weibull <- function(mu, shape, times) {
+    simtte::sim_tte(pi = mu, coefs = shape, time = max(times), type = "weibull")
+  }
+  
+  family$kl <- kl_surv_weibull
+  family$dis_fun <- dis_na
+  family$predvar <- predvar_surv_weibull
+  family$ll_fun <- ll_surv_weibull
+  family$deviance <- dev_surv_weibull
+  family$ppd <- ppd_surv_weibull
+  family$latent_factor <- latent_factor_family
+  
+  return(family)
+  
+}
+
+extend_family_surv_exponential <- function(family) {
+  
+  latent_factor_family <- .get_latent_factor_family()
+  
+  kl_surv_exponential <- function(pref, data, psub)
+    colSums( abs( (exp(psub$latent_factor - pref$latent_factor) - 1) / (exp(psub$latent_factor - pref$latent_factor) + 1) ) )
+  dis_na <- function(pref, psub, wobs = 1) rep(0, ncol(pref$mu))
+  predvar_surv_exponential <- function(mu, shape, wsample = 1) {
+    exp(-mu) # trasnforms parametric proportional hazard to extreme AFT 
+  }
+  ll_surv_exponential <- function(basehaz, aux , alpha, time, status, eta) {
+    args <- list(basehaz   = basehaz,
+                 aux       = aux,
+                 intercept = alpha)
+    args$times <- time
+    lhaz  <- do.call(rstanarm:::evaluate_log_basehaz,  args) + eta
+    lsurv <- do.call(rstanarm:::evaluate_log_basesurv, args) * exp(eta)
+    l_lik <- lsurv
+    l_lik[ ,status == 1] <- lhaz[ ,status == 1] + lsurv[ ,status == 1] 
+    l_lik
+  } 
+  dev_surv_exponential <- function(basehaz, aux , alpha, time, status, eta) {
+    args <- list(basehaz   = basehaz,
+                 aux       = aux,
+                 intercept = alpha)
+    args$times <- time
+    lhaz  <- do.call(rstanarm:::evaluate_log_basehaz,  args) + eta
+    lsurv <- do.call(rstanarm:::evaluate_log_basesurv, args) * exp(eta)
+    l_lik <- lsurv
+    l_lik[ ,status == 1] <- lhaz[ ,status == 1] + lsurv[ ,status == 1] 
+    -2*l_lik
+  } 
+  ppd_surv_exponential <- function(mu, shape, times) {
+    simtte::sim_tte(pi = mu, coefs = 1, time = max(times), type = "weibull")
+  }
+  
+  family$kl <- kl_surv_exponential
+  family$dis_fun <- dis_na
+  family$predvar <- predvar_surv_exponential
+  family$ll_fun <- ll_surv_exponential
+  family$deviance <- dev_surv_exponential
+  family$ppd <- ppd_surv_exponential
+  family$latent_factor <- latent_factor_family
+  
+  return(family)
+  
 }
 
 .has_dispersion <- function(family) {

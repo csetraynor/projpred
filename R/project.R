@@ -55,118 +55,209 @@
 ##'
 
 ##' @export
-project <- function(object, nv = NULL, vind = NULL, cv_search = TRUE, ns = 400, nc = NULL,
-                    intercept = NULL, seed = NULL, regul = 1e-4, ...) {
-  if (!("vsel" %in% class(object) || "cvsel" %in% class(object)) && is.null(vind)) {
-    stop(paste(
-      "The given object is not a variable selection -object.",
-      "Run the variable selection first, or provide the variable indices (vind)."
-    ))
-  }
-
+project <- function(object, nv = NULL, vind = NULL, relax = NULL, ns = NULL, nc = NULL, 
+                    intercept = NULL, seed = NULL, regul=1e-4, ...) {
+  
+  if (!inherits(object, c('vsel', 'cvsel')) && is.null(vind))
+    stop(paste('The object is not a variable selection object.',
+               'Run variable selection first, or provide the variable indices (vind).'))
+  
   refmodel <- get_refmodel(object)
-
-  if (cv_search) {
-    ## use non-cv_searched solution for datafits by default
-    cv_search <- !inherits(refmodel, "datafit")
-  }
-
-  if (inherits(refmodel, "datafit")) {
-    ns <- nc <- 1
-  }
-
-  if (!is.null(vind) &&
-    any(object$vind[1:length(vind)] != vind)) {
-    ## search path not found, or the given variable combination
-    ## not in the search path, then we need to project the
-    ## required variables
-    cv_search <- TRUE
-  }
-
+  
+  if (is.null(relax)) 
+    # use non-relaxed solution for datafits by default
+    relax <- ifelse('datafit' %in% class(get_refmodel(object)), FALSE, TRUE)
+  if (is.null(object$spath$beta) || (!is.null(vind) && any(object$spath$vind[1:length(vind)] != vind)))
+    # search path not found, or the given variable combination not in the search path
+    relax <- TRUE
+  
   if (!is.null(vind)) {
-    ## if vind is given, nv is ignored (project only onto the given submodel)
-    if (!is.null(object$vind)) {
-      vars <- object$vind
-    } else {
-      ## project only the given model on a fit object
-      vars <- setdiff(split_formula(refmodel$formula), "1")
-    }
-
-    if (max(vind) > length(vars)) {
-      stop("vind contains an index larger than the number of variables in the model.")
-    }
-
-    vind <- c(vars[vind])
-    nv <- length(vind)
+    if (max(vind) > ncol(refmodel$x))
+      stop('vind contains an index larger than ', ncol(refmodel$x), '.')
+    nv <- length(vind) # if vind is given, nv is ignored (project only onto the given submodel)
   } else {
-    ## by default take the variable ordering from the selection
-    vind <- object$vind
-    if (is.null(nv)) {
-      if (!is.null(object$suggested_size) && !is.na(object$suggested_size)) {
-        ## by default, project onto the suggested model size
-        nv <- object$suggested_size
-      } else {
-        stop("No suggested model size found, please specify nv or vind")
-      }
-    } else {
-      if (!is.numeric(nv) || any(nv < 0)) {
-        stop("nv must contain non-negative values.")
-      }
-      if (max(nv) > length(vind)) {
-        stop(paste(
-          "Cannot perform the projection with", max(nv), "variables,",
-          "because variable selection was run only up to", length(vind),
-          "variables."
-        ))
-      }
-    }
+    vind <- object$vind # by default take the variable ordering from the selection
   }
-
-  if (is.null(ns)) {
-    ns <- min(ns, NCOL(refmodel$mu))
+  
+  if (is.null(ns) && is.null(nc))
+    ns <- min(400, NCOL(refmodel$mu)) # by default project at most 400 draws
+  
+  if (is.null(nv)) {
+    if (!is.null(object$ssize) && !is.na(object$ssize))
+      nv <- object$ssize # by default, project onto the suggested model size
+    else
+      stop('No suggested model size found, please specify nv or vind')
   } else {
-    if (ns > NCOL(refmodel$mu)) {
-      stop("number of samples exceed the number of columns in the reference model's posterior.")
-    }
-    if (is.null(nc)) {
-      nc <- ns
+    if (!is.numeric(nv) || any(nv < 0))
+      stop('nv must contain non-negative values.')
+    if (max(nv) > length(vind)) {
+      stop(paste('Cannot perform the projection with', max(nv), 'variables,',
+                 'because variable selection was run only up to', length(vind),
+                 'variables.'))
     }
   }
-
-  if (is.null(nc)) {
-    nc <- 1
-  } else
-  if (nc > NCOL(refmodel$mu)) {
-    stop("number of clusters exceed the number of columns in the reference model's posterior.")
-  }
-
-  if (is.null(intercept)) {
+  
+  if (is.null(intercept))
     intercept <- refmodel$intercept
-  }
-
-  family <- refmodel$family
-
-  ## get the clustering or subsample
+  
+  family_kl <- refmodel$family
+  
+  # training data
+  d_train <- .get_traindata(refmodel)
+  
+  # get the clustering or subsample
   p_ref <- .get_refdist(refmodel, ns = ns, nc = nc, seed = seed)
-
-  ## project onto the submodels
-  subm <- .get_submodels(list(
-    vind = vind,
-    p_sel = object$spath$p_sel,
-    sub_fits = object$spath$sub_fits
-  ),
-  nv, family, p_ref, refmodel, intercept, regul,
-  cv_search = cv_search
-  )
-
-  ## add family
+  
+  # project onto the submodels
+  if (relax) {
+    subm <- .get_submodels(list(vind=vind), nv, family_kl, p_ref,
+                           d_train, refmodel, intercept, regul, cv_search =F)
+  } else {
+    subm <- .get_submodels(object$spath, nv, family_kl, p_ref,
+                           d_train, refmodel, intercept, regul, cv_search=T)
+  }
+  
+  # add family_kl
   proj <- lapply(subm, function(model) {
-    model <- c(model, nlist(family), list(p_type = is.null(ns)))
-    model$intercept <- intercept
-    class(model) <- "projection"
+    names(model$vind) <- sapply(model$vind, function(i, ch) names(ch)[which(ch == i)],
+                                object$vind)
+    model <- c(model, list(family_kl = family_kl), list(p_type = is.null(ns)))
+    class(model) <- 'projection'
     return(model)
   })
-
-  ## If only one model size, just return the proj instead of a list of projs
-  .unlist_proj(proj)
+  # If only one model size, just return the proj instead of a list of projs
+  proj <- .unlist_proj(proj)
+  proj <- back_matrix_project(proj)
+  proj$intercept <- intercept
+  return(proj)
 }
+
+back_matrix_project <- function(x) {
+  vind <- x$vind
+  alpha <- sapply(x$sub_fit, function(x)  as.matrix(x)[1])
+  beta <- sapply(x$sub_fit, function(x) cmdStanTools::pad(as.matrix(x), length(vind) + 1 ))
+  beta <- beta[-1, ]
+  beta <- beta[-length(x$vind), ]
+  w <- sapply(x$sub_fit, function(x) x$weights)
+  x$alpha <- alpha
+  x$beta <- beta
+  x$weights <- w
+  return(x)
+}
+
+
+# project <- function(object, nv = NULL, vind = NULL, cv_search = TRUE, ns = 400, nc = NULL,
+#                     intercept = NULL, seed = NULL, regul = 1e-4, ...) {
+#   if (!("vsel" %in% class(object) || "cvsel" %in% class(object)) && is.null(vind)) {
+#     stop(paste(
+#       "The given object is not a variable selection -object.",
+#       "Run the variable selection first, or provide the variable indices (vind)."
+#     ))
+#   }
+# 
+#   refmodel <- get_refmodel(object)
+# 
+#   if (cv_search) {
+#     ## use non-cv_searched solution for datafits by default
+#     cv_search <- !inherits(refmodel, "datafit")
+#   }
+# 
+#   if (inherits(refmodel, "datafit")) {
+#     ns <- nc <- 1
+#   }
+# 
+#   if (!is.null(vind) &&
+#     any(object$vind[1:length(vind)] != vind)) {
+#     ## search path not found, or the given variable combination
+#     ## not in the search path, then we need to project the
+#     ## required variables
+#     cv_search <- TRUE
+#   }
+# 
+#   if (!is.null(vind)) {
+#     ## if vind is given, nv is ignored (project only onto the given submodel)
+#     if (!is.null(object$vind)) {
+#       vars <- object$vind
+#     } else {
+#       ## project only the given model on a fit object
+#       vars <- setdiff(split_formula(refmodel$formula), "1")
+#     }
+# 
+#     if (max(vind) > length(vars)) {
+#       stop("vind contains an index larger than the number of variables in the model.")
+#     }
+# 
+#     vind <- c(vars[vind])
+#     nv <- length(vind)
+#   } else {
+#     ## by default take the variable ordering from the selection
+#     vind <- object$vind
+#     if (is.null(nv)) {
+#       if (!is.null(object$suggested_size) && !is.na(object$suggested_size)) {
+#         ## by default, project onto the suggested model size
+#         nv <- object$suggested_size
+#       } else {
+#         stop("No suggested model size found, please specify nv or vind")
+#       }
+#     } else {
+#       if (!is.numeric(nv) || any(nv < 0)) {
+#         stop("nv must contain non-negative values.")
+#       }
+#       if (max(nv) > length(vind)) {
+#         stop(paste(
+#           "Cannot perform the projection with", max(nv), "variables,",
+#           "because variable selection was run only up to", length(vind),
+#           "variables."
+#         ))
+#       }
+#     }
+#   }
+# 
+#   if (is.null(ns)) {
+#     ns <- min(ns, NCOL(refmodel$mu))
+#   } else {
+#     if (ns > NCOL(refmodel$mu)) {
+#       stop("number of samples exceed the number of columns in the reference model's posterior.")
+#     }
+#     if (is.null(nc)) {
+#       nc <- ns
+#     }
+#   }
+# 
+#   if (is.null(nc)) {
+#     nc <- 1
+#   } else
+#   if (nc > NCOL(refmodel$mu)) {
+#     stop("number of clusters exceed the number of columns in the reference model's posterior.")
+#   }
+# 
+#   if (is.null(intercept)) {
+#     intercept <- refmodel$intercept
+#   }
+# 
+#   family <- refmodel$family
+# 
+#   ## get the clustering or subsample
+#   p_ref <- .get_refdist(refmodel, ns = ns, nc = nc, seed = seed)
+# browser()
+#   ## project onto the submodels
+#   subm <- .get_submodels(list(
+#     vind = vind,
+#     p_sel = object$spath$p_sel,
+#     sub_fits = object$spath$sub_fits
+#   ),
+#   nv, family, p_ref, refmodel, intercept, regul,
+#   cv_search = cv_search
+#   )
+# 
+#   ## add family
+#   proj <- lapply(subm, function(model) {
+#     model <- c(model, nlist(family), list(p_type = is.null(ns)))
+#     model$intercept <- intercept
+#     class(model) <- "projection"
+#     return(model)
+#   })
+# 
+#   ## If only one model size, just return the proj instead of a list of projs
+#   .unlist_proj(proj)
+# }

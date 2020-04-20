@@ -1,47 +1,84 @@
-.get_sub_summaries <- function(submodels, test_points, refmodel, family, groups = NULL) {
-  has_group_features <- !is.null(groups)
+# .get_sub_summaries <- function(submodels, test_points, refmodel, family, groups = NULL) {
+#   has_group_features <- !is.null(groups)
+#   res <- lapply(submodels, function(model) {
+#     vind <- model$vind
+#     if (length(vind) == 0) {
+#       vind <- c("1")
+#     }
+#     sub_fit <- model$sub_fit
+#     weights <- refmodel$wobs[test_points]
+#     mu <- family$mu_fun(sub_fit,
+#       obs = test_points,
+#       offset = refmodel$offset[test_points],
+#       weights = weights
+#     )
+# 
+#     y <- refmodel$y[test_points]
+#     y_test <- nlist(y, weights)
+# 
+#     .weighted_summary_means(
+#       y_test, family, model$weights,
+#       matrix(mu, NROW(y), NCOL(mu)), model$dis
+#     )
+#   })
+# }
+
+.get_sub_summaries <- function(submodels, d_test, family_kl) {
+  
   res <- lapply(submodels, function(model) {
     vind <- model$vind
-    if (length(vind) == 0) {
-      vind <- c("1")
+    if(NROW(model$beta) == 0) {
+      xt <- matrix(0, nrow = length(d_test$weights), ncol = 0)
+    } else if(!is.matrix(d_test$x)) {
+      xt <- matrix(d_test$x[vind], nrow = 1)
+    } else {
+      xt <- d_test$x[, vind, drop = F]
     }
-    sub_fit <- model$sub_fit
-    weights <- refmodel$wobs[test_points]
-    mu <- family$mu_fun(sub_fit,
-      obs = test_points,
-      offset = refmodel$offset[test_points],
-      weights = weights
-    )
-
-    y <- refmodel$y[test_points]
-    y_test <- nlist(y, weights)
-
-    .weighted_summary_means(
-      y_test, family, model$weights,
-      matrix(mu, NROW(y), NCOL(mu)), model$dis
-    )
+    mu <- family_kl$mu_fun_proj(xt, model$alpha, model$beta, d_test$offset)
+    .weighted_summary_means(d_test, family_kl, model$weights, mu, model$dis)
   })
 }
 
-.weighted_summary_means <- function(y_test, family, wsample, mu, dis) {
-  loglik <- family$ll_fun(
-    mu, dis, matrix(y_test$y, nrow = NROW(mu)),
-    y_test$weights
-  )
+
+# Calculates weighted means of mu and lppd given samples of
+# mu and dis, and the test data.
+.weighted_summary_means <- function(d_test, family_kl, wsample, mu, dis) {
+  loglik <- family_kl$ll_fun(mu, dis, matrix(d_test$y,nrow=NROW(mu)), d_test$weights)
   if (length(loglik) == 1) {
     # one observation, one sample
     list(mu = mu, lppd = loglik)
-  } else if (is.null(dim(loglik))) {
+  } else if (is.null(dim(loglik))){
     # loglik is a vector, but not sure if it means one observation with many samples, or vice versa?
-    stop("Internal error encountered: loglik is a vector, but should be a scalar or matrix")
+    stop('Internal error encountered: loglik is a vector, but should be a scalar or matrix')
   } else {
     # mu is a matrix, so apply weighted sum over the samples
-    list(
-      mu = c(mu * wsample),
-      lppd = apply(loglik, 1, log_weighted_mean_exp, wsample)
-    )
+    list(mu = c(mu %*% wsample),
+         lppd = apply(loglik, 1, log_weighted_mean_exp, wsample))
   }
+  
 }
+
+
+
+# .weighted_summary_means <- function(y_test, family, wsample, mu, dis) {
+#   loglik <- family$ll_fun(
+#     mu, dis, matrix(y_test$y, nrow = NROW(mu)),
+#     y_test$weights
+#   )
+#   if (length(loglik) == 1) {
+#     # one observation, one sample
+#     list(mu = mu, lppd = loglik)
+#   } else if (is.null(dim(loglik))) {
+#     # loglik is a vector, but not sure if it means one observation with many samples, or vice versa?
+#     stop("Internal error encountered: loglik is a vector, but should be a scalar or matrix")
+#   } else {
+#     # mu is a matrix, so apply weighted sum over the samples
+#     list(
+#       mu = c(mu %*% wsample),
+#       lppd = apply(loglik, 1, log_weighted_mean_exp, wsample)
+#     )
+#   }
+# }
 
 #' copied from summary_funs to remove duplicated code
 .tabulate_stats <- function(varsel, stats, alpha = 0.05, nfeat_baseline = NULL) {
@@ -140,12 +177,11 @@ get_stat <- function(mu, lppd, d_test, family, stat, mu.bs = NULL, lppd.bs = NUL
     n_notna <- sum(!is.na(mu))
   }
 
-  if (is.null(weights)) {
-    ## set default weights if not given
-    weights <- rep(1 / n_notna, n)
-  }
-  ## ensure the weights sum to n_notna
-  weights <- n_notna * weights / sum(weights)
+  if (is.null(weights))
+    # set default weights if not given
+    weights <- rep(1/n_notna, n)
+  # ensure the weights sum to n_notna
+  weights <- n_notna*weights/sum(weights) 
 
 
   if (stat == "mlpd") {

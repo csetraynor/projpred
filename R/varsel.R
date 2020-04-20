@@ -59,6 +59,12 @@
 #' }
 #'
 
+d_test = NULL; method = "forward"; ns = NULL; nc = NULL;
+nspred = NULL; ncpred = NULL; cv_search=FALSE; nv_max = NULL;
+intercept = TRUE; verbose=TRUE; lambda_min_ratio=1e-5;
+nlambda=150; thresh=1e-6; regul=1e-4; penalty = NULL;
+groups=NULL
+
 #' @export
 varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
                        nspred = NULL, ncpred = NULL, cv_search=FALSE, nv_max = NULL,
@@ -80,15 +86,27 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
   ncpred <- args$ncpred
   nspred <- args$nspred
   groups <- args$groups
+
   has_group_features <- formula_contains_group_terms(refmodel$formula)
 
   if (method == 'l1' && has_group_features)
     stop('l1 search is not supported for multilevel models, switching to forward search')
-
+  d_train <- .get_traindata(refmodel)
+  x <- d_train$x
+  
   if (is.null(d_test)) {
     d_type <- 'train'
-    d_test <- list(y=refmodel$y, test_points=seq_along(refmodel$y))
+    d_test_devel <- list(y=refmodel$y, test_points=seq_along(refmodel$y))
   }
+  
+  if (is.null(d_test)) {
+    d_test <- d_train
+    d_type <- 'train'
+  } else {
+    d_test <- .check_data(d_test)
+    d_type <- 'test'
+  }
+  
 
   ## reference distributions for selection and prediction after selection
   p_sel <- .get_refdist(refmodel, ns, nc)
@@ -96,31 +114,47 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
 
   ## perform the selection
   opt <- nlist(lambda_min_ratio, nlambda, thresh, regul)
+
   searchpath <- select(method, p_sel, refmodel, family, intercept, nv_max,
                            penalty, verbose, opt, groups=groups)
   vind <- searchpath$vind
-
+  searchpath <- back_matrix_searchpath(searchpath)
   ## statistics for the selected submodels
   p_sub <- .get_submodels(searchpath, c(0, seq_along(vind)), family, p_pred,
-                              refmodel, intercept, regul, cv_search=cv_search)
-  sub <- .get_sub_summaries(p_sub, seq_along(refmodel$y), refmodel, family)
-
+                          d_train, refmodel, intercept, regul, cv_search=cv_search)
+  #sub <- .get_sub_summaries(p_sub, seq_along(refmodel$y), refmodel, family)
+  sub <- .get_sub_summaries(p_sub, d_test, family)
+  
   ## predictive statistics of the reference model on test data. if no test data are provided,
   ## simply fetch the statistics on the train data
+  # if ('datafit' %in% class(refmodel)) {
+  #   ## no actual reference model, so we don't know how to predict test observations
+  #   ntest <- NROW(refmodel$y)
+  #   ref <- list(mu=rep(NA, ntest), lppd=rep(NA, ntest))
+  # } else {
+  #   d_test$weights <- refmodel$wobs[d_test$test_points]
+  #   if (d_type == 'train') {
+  #     ref <- .weighted_summary_means(d_test_devel, family, refmodel$wsample, refmodel$mu, refmodel$dis)
+  #   } else {
+  #     mu_test <- refmodel$predfun(refmodel$fit, newdata=d_test$data)
+  #     ref <- .weighted_summary_means(d_test, family, refmodel$wsample, mu_test, refmodel$dis)
+  #   }
+  # }
+
   if ('datafit' %in% class(refmodel)) {
-    ## no actual reference model, so we don't know how to predict test observations
-    ntest <- NROW(refmodel$y)
-    ref <- list(mu=rep(NA, ntest), lppd=rep(NA, ntest))
+    # no actual reference model, so we don't know how to predict test observations
+    ntest <- nrow(d_test$z)
+    ref <- list(mu=rep(NA,ntest), lppd=rep(NA,ntest))
   } else {
-    d_test$weights <- refmodel$wobs[d_test$test_points]
     if (d_type == 'train') {
       ref <- .weighted_summary_means(d_test, family, refmodel$wsample, refmodel$mu, refmodel$dis)
     } else {
-      mu_test <- refmodel$predfun(refmodel$fit, newdata=d_test$data)
+      mu_test <- refmodel$predfun(d_test$z, d_test$offset)
       ref <- .weighted_summary_means(d_test, family, refmodel$wsample, mu_test, refmodel$dis)
     }
   }
-
+  
+  
   ## store the relevant fields into the object to be returned
   vs <- list(refmodel=refmodel,
              spath=searchpath,
@@ -176,6 +210,12 @@ parse_args_varsel <- function(refmodel, method, cv_search, intercept,
   ## some are not given, then this function fills them in with the default values. The purpose of this
   ## function is to avoid repeating the same code both in varsel and cv_varsel.
   ##
+
+  if(  is_surv_family(refmodel) ){
+    intercept = FALSE
+    family = family$latent_factor
+  }
+  
   if (is.null(groups))
     groups <- lapply(split_formula(refmodel$formula), function(t) t)
   has_group_features <- formula_contains_group_terms(refmodel$formula)
@@ -221,4 +261,16 @@ parse_args_varsel <- function(refmodel, method, cv_search, intercept,
 
 
   nlist(method, cv_search, intercept, nv_max, nc, ns, ncpred, nspred, groups)
+}
+
+back_matrix_searchpath <- function(x) {
+  vind <- x$vind
+  alpha <- sapply(x$sub_fits, function(x)  as.matrix(x)[1])
+  beta <- sapply(x$sub_fits, function(x) cmdStanTools::pad(as.matrix(x), length(vind) + 1 ))
+  beta <- beta[-1, ]
+  w <- sapply(x$sub_fits, function(x) x$weights)
+  x$alpha <- alpha
+  x$beta <- beta
+  x$weights <- w
+  return(x)
 }

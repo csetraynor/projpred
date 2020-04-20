@@ -133,13 +133,14 @@ get_refmodel.default <- function(fit, data, y, formula, predfun, proj_predfun,
   fetch_data_wrapper <- function(obs = folds, newdata = NULL) {
     fetch_data(data, obs, newdata)
   }
-
+  if(is_stansurv(fit)){
+    fit$family <- surv_family(fit)
+  }
   if (is.null(family)) {
     family <- extend_family(family(fit))
   } else {
     family <- extend_family(family)
   }
-
   refmodel <- init_refmodel(fit, data, y, formula, family, predfun, mle,
     proj_predfun,
     penalized = penalized, weights = wobs,
@@ -166,7 +167,6 @@ get_refmodel.brmsfit <- function(fit, data = NULL, y = NULL, formula = NULL,
   if (is.null(formula)) {
     formula <- brms_formula$formula
   }
-
   terms <- extract_terms_response(formula)
   response_name <- brms_formula$resp
 
@@ -200,11 +200,20 @@ get_refmodel.brmsfit <- function(fit, data = NULL, y = NULL, formula = NULL,
   return(refmodel)
 }
 
+data = NULL; y = NULL; formula = NULL;
+predfun = NULL; proj_predfun = NULL; mle = NULL;
+folds = NULL; penalized = FALSE
+
 #' @export
 get_refmodel.stanreg <- function(fit, data = NULL, y = NULL, formula = NULL,
                                  predfun = NULL, proj_predfun = NULL, mle = NULL,
                                  folds = NULL, penalized = FALSE, ...) {
-  family <- family(fit)
+  is_stansurv <- is_stan_surv(fit)
+  if(is_stansurv){
+    family <- surv_family(fit)
+  } else {
+    family <- family(fit)
+  }
   family <- extend_family(family)
 
   if (is.null(formula)) {
@@ -212,6 +221,10 @@ get_refmodel.stanreg <- function(fit, data = NULL, y = NULL, formula = NULL,
   }
   terms <- extract_terms_response(formula)
   response_name <- terms$response
+  if(is_stansurv) {
+    terms_latent <- terms
+    response_name_latent <- terms_latent$response <- "mu"
+  }
 
   if (is.null(data)) {
     data <- fit$data
@@ -219,7 +232,16 @@ get_refmodel.stanreg <- function(fit, data = NULL, y = NULL, formula = NULL,
 
   weights <- NULL
   if (is.null(y)) {
-    if (family$family == "binomial" && length(response_name) == 2) {
+    if(is_stansurv) {
+      stansurv_formula <- rstanarm:::parse_formula_and_data(formula, data)
+      stansurv_data    <- stansurv_formula$data; stansurv_formula[["data"]] <- NULL
+      mf_stuff <- rstanarm:::make_model_frame(stansurv_formula$tf_form, stansurv_data, drop.unused.levels = TRUE)
+      mf <- mf_stuff$mf # model frame
+      time <- rstanarm:::make_t(mf, type = "end") # exit  time
+      # event indicator for each row of data
+      status <- rstanarm:::make_d(mf)
+      y <- Surv(time, status)
+    } else if (family$family == "binomial" && length(response_name) == 2) {
       ## in rstanarm the convention is to set
       ## cbind(y, weight - y) ~ .
       response <- lapply(response_name, function(rhs) {
@@ -241,14 +263,31 @@ get_refmodel.stanreg <- function(fit, data = NULL, y = NULL, formula = NULL,
   return(refmodel)
 }
 
+predfun = NULL; mle = NULL;
+proj_predfun = NULL; folds = NULL; penalized = FALSE;
+weights = NULL; offset = NULL; cvfun = NULL; cvfits = NULL
+
 #' @export
 init_refmodel <- function(fit, data, y, formula, family, predfun = NULL, mle = NULL,
                           proj_predfun = NULL, folds = NULL, penalized = FALSE,
                           weights = NULL, offset = NULL, cvfun = NULL, cvfits = NULL, ...) {
   terms <- extract_terms_response(formula)
+  response_name <- terms$response
+  is_stansurv <- is_stan_surv(fit)
+  if(is_stansurv) {
+    terms_latent <- terms
+    response_name_latent <- terms_latent$response <- "mu"
+  }
+  
   if (is.null(predfun)) {
-    predfun <- function(fit, newdata = NULL) {
-      t(posterior_linpred(fit, transform = FALSE, newdata = newdata))
+    if(is_stansurv){
+      predfun <- function(fit, newdata = NULL) {
+        t(post_surv_latentfactor(fit, newdata))
+      }
+    } else {
+      predfun <- function(fit, newdata = NULL) {
+        t(posterior_linpred(fit, transform = FALSE, newdata = newdata))
+      }
     }
   }
 
@@ -281,7 +320,12 @@ init_refmodel <- function(fit, data, y, formula, family, predfun = NULL, mle = N
   if (!.has_family_extras(family)) {
     family <- extend_family(family)
   }
-
+  x <- rstanarm::get_x(fit)
+  rownames(x) <- NULL # ignore the rownames
+  x <- x[, as.logical(attr(x, 'assign')), drop=F] # drop the column of ones
+  attr(x, 'assign') <- NULL
+  
+  
   ## TODO: ideally remove this, have to think about it
   family$mu_fun <- function(fit, obs = folds, xnew = NULL, offset = NULL,
                             weights = NULL) {
@@ -310,7 +354,9 @@ init_refmodel <- function(fit, data, y, formula, family, predfun = NULL, mle = N
   if (proper_model) {
     mu <- predfun(fit)
     mu <- unname(as.matrix(mu))
-    mu <- family$linkinv(mu)
+    if(is_stansurv){
+      mu <- family$latent_factor$linkinv(mu)
+    }
   } else {
     mu <- matrix(y / weights, NROW(y), 1)
     predfun_datafit <- function(fit = NULL, newdata = NULL, offset = 0) {
@@ -340,9 +386,19 @@ init_refmodel <- function(fit, data, y, formula, family, predfun = NULL, mle = N
   }
   target <- .get_standard_y(y, weights, family)
   y <- target$y
-
   if (proper_model) {
-    loglik <- t(family$ll_fun(mu, dis, y, weights = weights))
+    if(is_stansurv){
+      draws <- rstanarm:::ll_args.stansurv(fit, newdata = NULL)$draws
+      basehaz = draws$basehaz
+      aux     = draws$aux
+      alpha = draws$alpha
+      time = y[,1]
+      status = y[,2]
+      loglik <- t(family$ll_fun(basehaz, aux, alpha, time, status, mu))
+    } else {
+      loglik <- t(family$ll_fun(mu, dis, y, weights = weights))
+    }
+
   } else {
     loglik <- NULL
   }
@@ -357,7 +413,7 @@ init_refmodel <- function(fit, data, y, formula, family, predfun = NULL, mle = N
   }
 
   intercept <- as.logical(attr(terms(formula), "intercept"))
-  refmodel <- nlist(fit, formula, mle, family, mu, dis, y, loglik,
+  refmodel <- nlist(fit, formula, mle, family, mu, dis, y, x, loglik,
     intercept, proj_predfun,
     fetch_data = fetch_data_wrapper,
     wobs = weights, wsample, offset, folds, cvfun, cvfits

@@ -2,9 +2,12 @@ search_forward <- function(p_ref, refmodel, family, intercept, nv_max,
                            verbose = TRUE, opt, groups = NULL, increasing_order = TRUE) {
   ## initialize the forward selection
   ## proj performs the projection over draws
+  is_stansurv <- is_surv_family(refmodel)
+  #browser()
   projfun <- .get_proj_handle(family, opt$regul)
 
   formula <- refmodel$formula
+  
   iq <- ceiling(quantile(1:nv_max, 1:10 / 10))
   if (is.null(groups)) {
     terms_ <- split_formula(formula)
