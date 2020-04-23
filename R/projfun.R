@@ -4,8 +4,16 @@
 project_gaussian <- function(vind, p_ref, d_train, family_kl, intercept, regul = 1e-12) {
 
     x <- d_train$x
-    mu <- p_ref$mu
     dis <- p_ref$dis
+    
+    latent_factor_dev <- family_kl$latent_factor_dev
+    if(latent_factor_dev){
+      mu <- p_ref$mu_latent 
+      family_kl <- rstanarm:::validate_family("gaussian")
+      family_kl <- kl_helpers(family_kl)
+    } else {
+      mu <- p_ref$mu
+    }
     
     if ("weights" %in% names(d_train))
         wobs <- d_train$weights
@@ -103,9 +111,10 @@ project_nongaussian <- function(vind, p_ref, d_train, family_kl, intercept,
 # function handle for the projection over samples. Gaussian case
 # uses analytical solution to do the projection over samples.
 .get_proj_handle <- function(family_kl, regul=1e-9) {
-
+  
+    is_gaussian_projection <- (family_kl$family == 'gaussian' && family_kl$link == 'identity') || family_kl$latent_factor_dev
     # Use analytical solution for gaussian because it is faster
-    if(family_kl$family == 'gaussian' && family_kl$link == 'identity') {
+    if(is_gaussian_projection) {
         return(
             function(vind, p_ref, d_train, intercept) {
                 project_gaussian(vind, p_ref, d_train, family_kl, intercept, regul=regul)
@@ -144,13 +153,16 @@ project_nongaussian <- function(vind, p_ref, d_train, family_kl, intercept,
       else
         beta <- searchpath$beta[1:nv,nv+1,drop=F]
       xsub <- d_train$x[, vind, drop = F]
+      
       mu <- family_kl$mu_fun(xsub, alpha, beta, d_train$offset)
+      mu_latent <- family_kl$latent_fun(xsub, alpha, beta, d_train$offset)
       submodel$dis <- family_kl$dis_fun(p_sel, list(mu=mu,w=w), d_train$weights)
       submodel$kl <- weighted.mean(family_kl$kl(p_sel, d_train, list(mu=mu,dis=submodel$dis)), p_sel$weights)
       submodel$weights <- p_sel$weights
       submodel$alpha <- alpha
       submodel$beta <- beta
       submodel$vind <- vind
+      submodel$mu_latent <- mu_latent
       submodel$intercept <- intercept
       return(submodel)
     }

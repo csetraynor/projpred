@@ -5,7 +5,15 @@ search_forward1 <- function(p_ref, d_train, family, intercept, nv_max,
                            verbose, opt) {
   
   # predictive mean and variance of the reference model (with parameters integrated out)
-  mu <- p_ref$mu 
+  latent_factor_dev <- opt$latent_factor_dev
+  if(latent_factor_dev){
+    mu <- p_ref$mu_latent 
+    family <- rstanarm:::validate_family("gaussian")
+    family <- kl_helpers(family)
+  } else {
+    mu <- p_ref$mu
+  }
+  
   v <- p_ref$var
   
   if (NCOL(mu) > 1 || NCOL(v) > 1)
@@ -57,7 +65,15 @@ search_forward <- function(p_ref, d_train, family_kl, intercept, nv_max,
 search_L1 <- function(p_ref, d_train, family, intercept, nv_max, penalty, opt) {
   
   # predictive mean and variance of the reference model (with parameters integrated out)
-  mu <- p_ref$mu
+  latent_factor_dev <- opt$latent_factor_dev
+  if(latent_factor_dev){
+    mu <- p_ref$mu_latent 
+    family <- rstanarm:::validate_family("gaussian")
+    family <- kl_helpers(family)
+  } else {
+    mu <- p_ref$mu
+  }
+  
   v <- p_ref$var
   
   if (NCOL(mu) > 1 || NCOL(v) > 1)

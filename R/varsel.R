@@ -42,6 +42,8 @@
 #' @param thresh Convergence threshold when computing L1-path. Usually no need to change this.
 #' @param regul Amount of regularization in the projection. Usually there is no need for 
 #' regularization, but sometimes for some models the projection can be ill-behaved and we
+#' @param latent_factor_dev Boolean parameter to indicate to use
+#'  the development function that projects the latent factor instead.
 #' need to add some regularization to avoid numerical problems.
 #' @param ... Additional arguments to be passed to the \code{get_refmodel}-function.
 #'
@@ -65,14 +67,16 @@
 #' }
 #' }
 #'
-
 #' @export
 varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL, 
                    nspred = NULL, ncpred = NULL, relax=NULL, nv_max = NULL, 
                    intercept = NULL, penalty=NULL, verbose = F, 
-                   lambda_min_ratio=1e-5, nlambda=150, thresh=1e-6, regul=1e-4, ...) {
+                   lambda_min_ratio=1e-5, nlambda=150, thresh=1e-6, regul=1e-4, latent_factor_dev = TRUE, ...) {
   
   refmodel <- get_refmodel(object, ...)
+  
+  latent_factor_dev <- latent_factor_dev ## for reference here, should default to FALSE?
+  refmodel$fam$latent_factor_dev <- latent_factor_dev
   family_kl <- refmodel$fam
   
   # fetch the default arguments or replace them by the user defined values
@@ -85,6 +89,7 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
   ns <- args$ns
   ncpred <- args$ncpred
   nspred <- args$nspred
+
   
   # training and test data
   d_train <- .get_traindata(refmodel)
@@ -101,7 +106,7 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
   p_pred <- .get_refdist(refmodel, nspred, ncpred)
   
   # perform the selection
-  opt <- list(lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, thresh=thresh, regul=regul)
+  opt <- list(lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, thresh=thresh, regul=regul, latent_factor_dev = latent_factor_dev)
   searchpath <- select(method, p_sel, d_train, family_kl, intercept, nv_max, penalty, verbose, opt)
   vind <- searchpath$vind
   

@@ -61,7 +61,6 @@
 #' }
 #' }
 #'
-
 #' @export
 project <- function(object, nv = NULL, vind = NULL, relax = NULL, ns = NULL, nc = NULL, 
                     intercept = NULL, seed = NULL, regul=1e-4, ...) {
@@ -115,6 +114,8 @@ project <- function(object, nv = NULL, vind = NULL, relax = NULL, ns = NULL, nc 
 
 	# get the clustering or subsample
 	p_ref <- .get_refdist(refmodel, ns = ns, nc = nc, seed = seed)
+	#p_ref$mu_latent <- family_kl$linkfun(p_ref$mu)
+	p_ref$mu_latent <- family_kl$linkfun(p_ref$mu)
 
 	# project onto the submodels
 	if (relax) {

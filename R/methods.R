@@ -76,7 +76,7 @@ NULL
 # the predictive distribution if called from proj_predict.
 proj_helper <- function(object, xnew, offsetnew, weightsnew, nv, seed_samp,
                         fun, ...) {
-
+  
   if (!inherits(xnew, c('data.frame', 'matrix')))
     stop('xnew must be a data.frame or a matrix. See ?proj-pred.')
 
@@ -479,7 +479,7 @@ print.cvsel <- function(x, digits=2, ...) {
 #' @export
 suggest_size <- function(object, stat = 'elpd', alpha = 0.32, pct = 0.0, type='upper', 
                          baseline=NULL, warnings=TRUE, ...) {
-
+  
   .validate_vsel_object_stats(object, stat)
   if (length(stat) > 1)
     stop('Only one statistic can be specified to suggest_size')

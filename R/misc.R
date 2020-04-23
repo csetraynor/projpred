@@ -208,6 +208,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
   # then clustering is used and ns is ignored. Returns a list with fields:
   #
 	#   mu: n-by-s matrix, vector of expected values for y for each draw/cluster. here s
+  #   mu_latent : same as mu for latent factor.
   #       means either the number of draws ns or clusters nc used, depending on which one is used.
   #   var: n-by-s matrix, vector of predictive variances for y for each draw/cluster which
   #         which are needed for projecting the dispersion parameter (note that this can be
@@ -263,14 +264,14 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 	return(p_ref)
 }
 
-
+#nc=10; wobs=rep(1,dim(mu)[1]); wsample=rep(1,dim(mu)[2])
 
 .get_p_clust <- function(family_kl, mu, dis, nc=10, wobs=rep(1,dim(mu)[1]), wsample=rep(1,dim(mu)[2]), cl = NULL) {
 	# Function for perfoming the clustering over the samples.
 	#
 	# cluster the samples in the latent space if no clustering provided
 	if (is.null(cl)) {
-		f <- family_kl$linkfun(mu)
+	  f <- family_kl$linkfun(mu)
 		out <- kmeans(t(f), nc, iter.max = 50)
 		cl <- out$cluster # cluster indices for each sample
 	} else if (typeof(cl)=='list') {
@@ -284,6 +285,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 	# returned by kmeans if the samples have differing weights
 	nc <- max(cl, na.rm=T) # number of clusters (assumes labeling 1,...,nc)
 	centers <- matrix(0, nrow=nc, ncol=dim(mu)[1])
+	centers_latent_factor <- matrix(0, nrow=nc, ncol=dim(mu)[1])
 	wcluster <- rep(0,nc) # cluster weights
 	eps <- 1e-10
 	for (j in 1:nc) {
@@ -293,6 +295,10 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 		
 		# cluster centers and their weights
 		centers[j,] <- mu[,ind,drop=F] %*% ws
+		#centers_latent_factor[j,] <- family_kl$linkfun(mu[,ind,drop=F] %*% ws)
+		centers_latent_factor[j,] <- family_kl$linkfun(mu[,ind,drop=F]) %*% ws
+		# or the following method could also potentially be useful for testing... it boils down that the operation is not commutative   
+		#	
 		wcluster[j] <- sum(wsample[ind]) # unnormalized weight for the jth cluster
 	}
 	wcluster <- wcluster/sum(wcluster)
@@ -307,6 +313,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 	
 	# combine the results
 	p <- list(mu = unname(t(centers)),
+	          mu_latent = unname(t(centers_latent_factor)),
 						var = predvar,
 						weights = wcluster,
 						cl = cl)

@@ -236,7 +236,7 @@ get_refmodel.brmsfit <- function(object, ...) {
     z = z, y = y, family = fam, x = x, 
     predfun = predfun, dis = dis, offset = offset,
     wobs = wobs, wsample = wsample, intercept = intercept, 
-    cvfits = NULL, cvfun = cvfun
+    cvfits = NULL, cvfun = cvfun, ...
   ) 
 }
 
@@ -335,7 +335,7 @@ get_refmodel.brmsfit <- function(object, ...) {
 #' @export
 init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=NULL,
                           wobs=NULL, wsample=NULL, intercept=TRUE, cvfun=NULL, cvfits=NULL,  ...) {
-	
+  
 	n <- NROW(z)
 	family <- kl_helpers(family)
 	
@@ -353,11 +353,15 @@ init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=N
 		# no prediction function given, so the 'reference model' will simply contain the
 		# observed data as the fitted values
 		predmu <- function(z,offset=0) matrix(rep(NA, NROW(z)))
+		predlatentmu <- function(z,offset=0) matrix(rep(NA, NROW(z)))
 		mu <- y
+		latentmu <- y
 		proper_model <- FALSE
 	}	else {
 		# genuine reference model. add impact of offset to the prediction function
-		predmu <- function(z,offset=0) family$linkinv( family$linkfun(predfun(z)) + offset )
+	  predmu_latent <- function(z,offset=0) family$linkfun(predfun(z)) + offset 
+	  predmu <- function(z,offset=0) family$linkinv( family$linkfun(predfun(z)) + offset )
+	  mu_latent <- predmu_latent(z,offset)
 		mu <- predmu(z,offset)
 		if (NROW(y)!=NROW(mu)) 
 			stop(paste0('The number of rows in the output of predfun(z) does not match with the given y;',
@@ -370,6 +374,10 @@ init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=N
 			stop(sprintf('Family %s needs a dispersion parameter so you must specify input argument \'dis\'.', family$family))
 	
 	mu <- unname(as.matrix(mu))
+	mu_latent <- unname(as.matrix(mu_latent))
+	if(NCOL(mu) != NCOL(mu_latent)) {
+	  stop("mu and latent mu not have same dim probably a bug!")
+	}
 	S <- NCOL(mu) # number of samples in the reference model
 	
 	if (is.null(dis))
@@ -383,8 +391,9 @@ init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=N
 	wsample <- wsample/sum(wsample)
 	
 	# compute log-likelihood
-	if (proper_model)
-		loglik <- t(family$ll_fun(mu,dis,y,wobs))
+	if (proper_model) {
+	  loglik <- t(family$ll_fun(mu,dis,y,wobs))
+	}
 	else
 		loglik <- NULL
 	
@@ -400,7 +409,7 @@ init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=N
 	  cvfun <- function(folds) lapply(1:max(folds), function(k) list())
 	}
 	
-	refmodel <- list(z=z, x=x, y=y, fam=family, mu=mu, dis=dis, nobs=n, coefnames=coefnames,
+	refmodel <- list(z=z, x=x, y=y, fam=family, mu=mu, mu_latent = mu_latent, dis=dis, nobs=n, coefnames=coefnames,
 	                 offset=offset, wobs=wobs, wsample=wsample, intercept=intercept,
 	                 predfun=predmu, loglik=loglik, cvfits=cvfits, cvfun=cvfun)
 	

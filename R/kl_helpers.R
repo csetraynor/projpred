@@ -147,6 +147,12 @@ kl_helpers <- function(fam) {
     if (!is.matrix(beta)) stop('beta must be a matrix')
     fam$linkinv(cbind(1, x) %*% rbind(alpha, beta) + offset)
   }
+  
+  latent_fun <- function(x, alpha, beta, offset) {
+    if (!is.matrix(x)) stop('x must be a matrix.')
+    if (!is.matrix(beta)) stop('beta must be a matrix')
+    return(cbind(1, x) %*% rbind(alpha, beta) + offset)
+  }
 
   # return the family object with the correct function handles
   c(switch(fam$family,
@@ -161,7 +167,7 @@ kl_helpers <- function(fam) {
   				 'Student_t' = list(kl = kl_student_t, ll_fun = ll_student_t, deviance = dev_student_t, dis_fun = dis_student_t,
   				 									predvar = predvar_student_t, ppd_fun = ppd_student_t)
   				 ),
-    list(mu_fun = mu_fun), fam)
+    list(mu_fun = mu_fun, latent_fun = latent_fun), fam)
 
 }
 

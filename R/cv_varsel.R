@@ -63,9 +63,12 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
                       ns = NULL, nc = NULL, nspred = NULL, ncpred = NULL, relax=NULL,
                       nv_max = NULL, intercept = NULL, penalty = NULL, verbose = T,
                       nloo=NULL, K = NULL, lambda_min_ratio=1e-5, nlambda=150,
-                      thresh=1e-6, regul=1e-4, validate_search=T, seed=NULL, ...) {
+                      thresh=1e-6, regul=1e-4, validate_search=T, seed=NULL, latent_factor_dev = TRUE, ...) {
 
 	refmodel <- get_refmodel(fit, ...)
+	latent_factor_dev <- latent_factor_dev ## for reference here, should default to FALSE?
+	refmodel$fam$latent_factor_dev <- latent_factor_dev
+	family_kl <- refmodel$fam
 	
 	# resolve the arguments similar to varsel
 	args <- parseargs_varsel(refmodel, method, relax, intercept, nv_max, nc, ns, ncpred, nspred)
@@ -84,7 +87,7 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
 	K <- args$K
 
 	# search options
-	opt <- list(lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, thresh=thresh, regul=regul)
+	opt <- list(lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, thresh=thresh, regul=regul, latent_factor_dev = latent_factor_dev)
 	
 	if (tolower(cv_method) == 'kfold') {
 	  # TODO: should we save the cvfits object to the reference model so that it need not be computed again
@@ -104,7 +107,7 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
 		cat('Performing variable selection using all data...\n')
 	sel <- varsel(refmodel, method=method, ns=ns, nc=nc, nspred=nspred, ncpred=ncpred,
 	              relax=relax, nv_max=nv_max, intercept=intercept, penalty=penalty, verbose=verbose, 
-	              lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, regul=regul)
+	              lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, regul=regul, latent_factor_dev = latent_factor_dev)
 
 
 	# find out how many of cross-validated iterations select
@@ -213,8 +216,6 @@ kfold_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax
   vind_cv <- lapply(spath_cv, function(e) e$vind)
   if (verbose)
     close(pb)
-  
-
   # Construct submodel projections for each fold
   as.search <- !relax && !is.null(spath_cv[[1]]$beta) && !is.null(spath_cv[[1]]$alpha)
   if (verbose && !as.search) {
