@@ -17,6 +17,11 @@ kl_helpers <- function(fam) {
 
   # kl-divergences
   # for binomial and poisson it is the mean of the dev.resids divided by 2
+  
+  if(is_surv_family(fam))
+    # if the family is stan_surv use kl_helpers_surv
+    return(kl_helpers_surv(fam))
+  
 	# NOTE: we should get rid off these, they are not much of a help..
   kl_dev <- function(pref, data, psub) {
     if(NCOL(pref$mu)>1) {
@@ -184,9 +189,6 @@ kl_helpers <- function(fam) {
   # created by kl_helpers
   !is.null(fam$deviance)
 }
-
-
-
 
 
 

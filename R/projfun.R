@@ -106,15 +106,14 @@ project_nongaussian <- function(vind, p_ref, d_train, family_kl, intercept,
 	return(submodel)
 }
 
-
-
 # function handle for the projection over samples. Gaussian case
 # uses analytical solution to do the projection over samples.
 .get_proj_handle <- function(family_kl, regul=1e-9) {
   
     is_gaussian_projection <- (family_kl$family == 'gaussian' && family_kl$link == 'identity') || family_kl$latent_factor_dev
-    # Use analytical solution for gaussian because it is faster
-    if(is_gaussian_projection) {
+    
+  # Use analytical solution for gaussian because it is faster
+   if(is_gaussian_projection) {
         return(
             function(vind, p_ref, d_train, intercept) {
                 project_gaussian(vind, p_ref, d_train, family_kl, intercept, regul=regul)

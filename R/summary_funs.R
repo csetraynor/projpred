@@ -1,27 +1,56 @@
 
 
 .get_sub_summaries <- function(submodels, d_test, family_kl) {
-
-  res <- lapply(submodels, function(model) {
-  	vind <- model$vind
-    if(NROW(model$beta) == 0) {
-      xt <- matrix(0, nrow = length(d_test$weights), ncol = 0)
-    } else if(!is.matrix(d_test$x)) {
-      xt <- matrix(d_test$x[vind], nrow = 1)
-    } else {
-      xt <- d_test$x[, vind, drop = F]
-    }
-    mu <- family_kl$mu_fun(xt, model$alpha, model$beta, d_test$offset)
-    .weighted_summary_means(d_test, family_kl, model$weights, mu, model$dis)
-  })
+  
+  if(is_surv_family(family_kl)) {
+    res <- lapply(submodels, function(model) {
+      vind <- model$vind
+      if(NROW(model$beta) == 0) {
+        xt <- matrix(0, nrow = length(d_test$weights), ncol = 0)
+      } else if(!is.matrix(d_test$x)) {
+        xt <- matrix(d_test$x[vind], nrow = 1)
+      } else {
+        xt <- d_test$x[, vind, drop = F]
+      }
+      mu <- family_kl$latent_fun(xt, model$alpha, model$beta, d_test$offset) 
+      .weighted_summary_means(d_test, family_kl, model$weights, mu , model$aux, model$alpha)
+    })
+    return(res)
+  } else {
+    res <- lapply(submodels, function(model) {
+      vind <- model$vind
+      if(NROW(model$beta) == 0) {
+        xt <- matrix(0, nrow = length(d_test$weights), ncol = 0)
+      } else if(!is.matrix(d_test$x)) {
+        xt <- matrix(d_test$x[vind], nrow = 1)
+      } else {
+        xt <- d_test$x[, vind, drop = F]
+      }
+      mu <- family_kl$mu_fun(xt, model$alpha, model$beta, d_test$offset)
+      .weighted_summary_means(d_test, family_kl, model$weights, mu, model$dis)
+    })
+    return(res)
+  }
 }
 
 
 # Calculates weighted means of mu and lppd given samples of
 # mu and dis, and the test data.
-.weighted_summary_means <- function(d_test, family_kl, wsample, mu, dis) {
-
-  loglik <- family_kl$ll_fun(mu, dis, matrix(d_test$y,nrow=NROW(mu)), d_test$weights)
+.weighted_summary_means <- function(d_test, family_kl, wsample, mu, dis, alpha) {
+  if(is_surv_family(family_kl)) {
+    ll_args_surv <- list()
+    ll_args_surv$basehaz <- family_kl$basehaz
+    loglik <- sapply(seq_len(ncol(mu)), function(j) {
+      ll_args_surv$alpha <- alpha[j]
+      ll_args_surv$aux <- dis[j]  ## aux
+      family_kl$ll_fun(mu[,j,drop=FALSE], dis, d_test$y, d_test$weights, ll_args_surv)
+    } )
+    if(!is.matrix(loglik)){
+      loglik <- t(as.matrix(loglik))
+    }
+  } else {
+    loglik <- family_kl$ll_fun(mu, dis, matrix(d_test$y,nrow=NROW(mu)), d_test$weights)
+  }
   if (length(loglik) == 1) {
     # one observation, one sample
     list(mu = mu, lppd = loglik)
@@ -31,7 +60,7 @@
   } else {
     # mu is a matrix, so apply weighted sum over the samples
     list(mu = c(mu %*% wsample),
-         lppd = apply(loglik, 1, log_weighted_mean_exp, wsample))
+         lppd = as.numeric( apply(loglik, 1, log_weighted_mean_exp, wsample)) )
   }
   
 }
@@ -49,7 +78,7 @@
   # (nfeat_baseline = Inf means reference model).
   
   stat_tab <- data.frame()
-  
+ 
   summ_ref <- varsel$summaries$ref
   summ_sub <- varsel$summaries$sub
   
@@ -124,7 +153,6 @@ get_stat <- function(mu, lppd, d_test, family, stat, mu.bs=NULL, lppd.bs=NULL,
   # used as a baseline for computing the difference in the given statistic,
   # for example the relative elpd. If these arguments are not given (NULL) then
   # the actual (non-relative) value is computed.
-  
   n <- length(mu)
   
   if (stat %in% c('mlpd','elpd'))

@@ -72,13 +72,18 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
                    nspred = NULL, ncpred = NULL, relax=NULL, nv_max = NULL, 
                    intercept = NULL, penalty=NULL, verbose = F, 
                    lambda_min_ratio=1e-5, nlambda=150, thresh=1e-6, regul=1e-4, latent_factor_dev = TRUE, ...) {
-  
+  if(is_stan_surv(object)) {
+    object$family <- surv_family()
+  }
   refmodel <- get_refmodel(object, ...)
-  
   latent_factor_dev <- latent_factor_dev ## for reference here, should default to FALSE?
   refmodel$fam$latent_factor_dev <- latent_factor_dev
   family_kl <- refmodel$fam
-  
+  if(is_surv_family(family_kl)) {
+    if(is_stan_surv(object)) {
+      family_kl$basehaz <- rstanarm:::get_basehaz(object)
+    } 
+  }
   # fetch the default arguments or replace them by the user defined values
   args <- parseargs_varsel(refmodel, method, relax, intercept, nv_max, nc, ns, ncpred, nspred)
   method <- args$method
@@ -114,6 +119,10 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
   as.search <- !relax && !is.null(searchpath$beta) && !is.null(searchpath$alpha)
   p_sub <- .get_submodels(searchpath, c(0, seq_along(vind)), family_kl, p_pred,
                           d_train, intercept, regul, as.search=as.search)
+  p_sub <- lapply(p_sub, function(sub) {
+    sub$aux <- p_pred$aux
+    return(sub)
+  } )
   sub <- .get_sub_summaries(p_sub, d_test, family_kl)
   
   # predictive statistics of the reference model on test data. if no test data are provided, 
@@ -124,10 +133,22 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
     ref <- list(mu=rep(NA,ntest), lppd=rep(NA,ntest))
   } else {
     if (d_type == 'train') {
-      ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, refmodel$mu, refmodel$dis)
+      if(is_surv_family(family_kl)) {
+        ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, refmodel$mu_latent, refmodel$aux, c(refmodel$alpha) )
+      } else {
+        ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, refmodel$mu, refmodel$dis)
+      }
     } else {
-      mu_test <- refmodel$predfun(d_test$z, d_test$offset)
-      ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, mu_test, refmodel$dis)
+      if(is_surv_family(family_kl)) {
+        mu_test <- family_kl$linkfun( refmodel$predfun(d_test$z, d_test$offset) )
+        ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, mu_test , refmodel$aux, c(refmodel$alpha))
+        
+      } else {
+        mu_test <- family_kl$linkfun( refmodel$predfun(d_test$z, d_test$offset) )
+        ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, mu_test , refmodel$dis, c(refmodel$alpha))
+      }
+      
+
     }
   }
   

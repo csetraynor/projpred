@@ -4,6 +4,11 @@
   packageStartupMessage(msg)
 }
 
+num.mode <- function(obj, ...) {
+  dd <- density(obj, ...)
+  dd$x[which.max(dd$y)]
+} 
+
 weighted.sd <- function(x, w, na.rm=F) {
 	if (na.rm) {
 		ind <- !is.na(w) & !is.na(x)
@@ -30,7 +35,6 @@ weighted.cov <- function(x,y, w, na.rm=F) {
 	my <- sum(y[ind]*w[ind])
 	n/(n-1)*sum(w[ind]*(x[ind] - mx)*(x[ind] - my))
 }
-
 
 log_weighted_mean_exp <- function(x, w) {
   x <- x + log(w)
@@ -171,7 +175,21 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
   # and weights give the number of observations at each x.
   # for all other families, y and weights are kept as they are (unless weights is
   # a vector with length zero in which case it is replaced by a vector of ones).
-  if(NCOL(y) == 1) {
+  
+  if(is_surv_family(fam)) {
+    if(length(weights) > 0) 
+      weights <- unname(weights)
+    else 
+      weights <- rep(1, length(y))
+    if(survival::is.Surv(y)) {
+      y <- as.matrix(y)
+      colnames(y) <- c("time", "status")
+    } else {
+      "Only survival class allowed for surv family"
+    }
+    return(list(y=y,weights=weights))
+
+  } else if(NCOL(y) == 1) {
     # weights <- if(length(weights) > 0) unname(weights) else rep(1, length(y))
     if(length(weights) > 0) 
       weights <- unname(weights)
@@ -235,7 +253,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 		if (nc == 1) {
 			# special case, only one cluster
 			cl <- rep(1, S)
-			p_ref <- .get_p_clust(fam, refmodel$mu, refmodel$dis, wobs=refmodel$wobs, cl=cl)
+			p_ref <- .get_p_clust(fam, refmodel$mu, refmodel$dis, wobs=refmodel$wobs, aux =  refmodel$aux, cl=cl)
 		} else if (nc == NCOL(refmodel$mu)) {
 		    # number of clusters equal to the number of samples, so return the samples
 		    return(.get_refdist(refmodel, ns=nc))
@@ -243,7 +261,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 			# several clusters
 		    if (nc > NCOL(refmodel$mu))
 		        stop('The number of clusters nc cannot exceed the number of columns in mu.')
-			p_ref <- .get_p_clust(fam, refmodel$mu, refmodel$dis, wobs=refmodel$wobs, nc=nc)
+			p_ref <- .get_p_clust(fam, refmodel$mu, refmodel$dis, wobs=refmodel$wobs, aux = refmodel$aux, nc=nc)
 		}
 	} else if (!is.null(ns)) {
 		# subsample from the reference model
@@ -254,11 +272,13 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 		cl <- rep(NA, S)
 		cl[s_ind] <- c(1:ns)
 		predvar <- sapply(s_ind, function(j) { fam$predvar(refmodel$mu[,j,drop=F], refmodel$dis[j]) })
-		p_ref <- list(mu = refmodel$mu[, s_ind, drop=F], var = predvar, dis = refmodel$dis[s_ind], weights = rep(1/ns, ns), cl=cl)
+		aux <-  sapply(s_ind, function(j) { refmodel$aux[j, ]	})
+		p_ref <- list(mu = refmodel$mu[, s_ind, drop=F], var = predvar, dis = refmodel$dis[s_ind], aux = aux, weights = rep(1/ns, ns), cl=cl)
 	} else {
 		# use all the draws from the reference model
 		predvar <- sapply(1:S, function(j) { fam$predvar(refmodel$mu[,j,drop=F], refmodel$dis[j])	})
-		p_ref <- list(mu = refmodel$mu, var = predvar, dis = refmodel$dis, weights = refmodel$wsample, cl=c(1:S))
+		aux <-  sapply(1:S, function(j) { refmodel$aux[j, ]	})
+		p_ref <- list(mu = refmodel$mu, var = predvar, dis = refmodel$dis, aux = aux, weights = refmodel$wsample, cl=c(1:S))
 	}
 
 	return(p_ref)
@@ -266,7 +286,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 
 #nc=10; wobs=rep(1,dim(mu)[1]); wsample=rep(1,dim(mu)[2])
 
-.get_p_clust <- function(family_kl, mu, dis, nc=10, wobs=rep(1,dim(mu)[1]), wsample=rep(1,dim(mu)[2]), cl = NULL) {
+.get_p_clust <- function(family_kl, mu, dis, aux, nc=10, wobs=rep(1,dim(mu)[1]), wsample=rep(1,dim(mu)[2]), cl = NULL) {
 	# Function for perfoming the clustering over the samples.
 	#
 	# cluster the samples in the latent space if no clustering provided
@@ -311,15 +331,20 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 		family_kl$predvar( mu[,ind,drop=F], dis[ind], ws )
 	})
 	
+	modeaux <- sapply(1:nc, function(j) {
+	  # compute normalized weights within the cluster, 1-eps is for numerical stability
+	  num.mode(aux)
+	})
+
 	# combine the results
 	p <- list(mu = unname(t(centers)),
 	          mu_latent = unname(t(centers_latent_factor)),
 						var = predvar,
+						aux = modeaux, 
 						weights = wcluster,
 						cl = cl)
 	return(p)
 }
-
 
 
 .get_traindata <- function(refmodel) {
@@ -394,3 +419,7 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
 .is_proj_list <- function(proj) { !( 'family_kl' %in% names(proj) ) }
 
 .unlist_proj <- function(p) if(length(p) == 1) p[[1]] else p
+
+
+
+

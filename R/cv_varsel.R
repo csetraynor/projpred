@@ -57,7 +57,11 @@
 #' }
 #' }
 #'
-
+# fit = mod_surv;  method = NULL; cv_method = NULL;
+# ns = NULL; nc = NULL; nspred = NULL; ncpred = NULL; relax=NULL;
+# nv_max = NULL; intercept = NULL; penalty = NULL; verbose = T;
+# nloo=NULL; K = NULL; lambda_min_ratio=1e-5; nlambda=150;
+# thresh=1e-6; regul=1e-4; validate_search=T; seed=NULL; latent_factor_dev = TRUE
 #' @export
 cv_varsel <- function(fit,  method = NULL, cv_method = NULL, 
                       ns = NULL, nc = NULL, nspred = NULL, ncpred = NULL, relax=NULL,
@@ -65,11 +69,18 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
                       nloo=NULL, K = NULL, lambda_min_ratio=1e-5, nlambda=150,
                       thresh=1e-6, regul=1e-4, validate_search=T, seed=NULL, latent_factor_dev = TRUE, ...) {
 
-	refmodel <- get_refmodel(fit, ...)
+  if(is_stan_surv(fit)) {
+    fit$family <- surv_family()
+  }
+	# refmodel <- get_refmodel(fit, ...)
+	refmodel <- get_refmodel(fit)
 	latent_factor_dev <- latent_factor_dev ## for reference here, should default to FALSE?
 	refmodel$fam$latent_factor_dev <- latent_factor_dev
 	family_kl <- refmodel$fam
-	
+	if(is_surv_family(family_kl)) {
+	  family_kl$basehaz <- rstanarm:::get_basehaz(fit)
+	  refmodel$fam <- family_kl
+	}
 	# resolve the arguments similar to varsel
 	args <- parseargs_varsel(refmodel, method, relax, intercept, nv_max, nc, ns, ncpred, nspred)
 	method <- args$method
@@ -309,7 +320,7 @@ kfold_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax
 }
 
 
-
+# nloo = NULL; validate_search = T; seed = NULL
 loo_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax, intercept, 
                        penalty, verbose, opt, nloo = NULL, validate_search = T, seed = NULL) {
 	#
@@ -317,12 +328,12 @@ loo_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax, 
 	# validate_search indicates whether the selection is performed separately for each
   # fold (for each data point)
   #
-  
+
 	fam <- refmodel$fam
 	mu <- refmodel$mu
 	dis <- refmodel$dis
 	n <- nrow(mu)
-
+	latent_factor_dev <- fam$latent_factor_dev
 	# by default use all observations
 	nloo <- ifelse(is.null(nloo), n, min(nloo, n))
 	if (nloo < 1)
@@ -356,8 +367,10 @@ loo_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax, 
 	d_test <- d_train
 	loo_ref <- apply(loglik+lw, 2, 'log_sum_exp')
 	mu_ref <- rep(0,n)
+	
+	
 	for (i in 1:n)
-    mu_ref[i] <- mu[i,] %*% exp(lw[,i])
+	  mu_ref[i] <- mu[i,] %*% exp(lw[,i])
 	
 	# decide which points form the validation set based on the k-values
 	validset <- .loo_subsample(n, nloo, pareto_k, seed)
@@ -387,8 +400,8 @@ loo_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax, 
 	  i <- inds[run_index]
 
 	  # reweight the clusters/samples according to the is-loo weights
-	  p_sel <- .get_p_clust(fam, mu, dis, wobs=refmodel$wobs, wsample=exp(lw[,i]), cl=cl_sel)
-	  p_pred <- .get_p_clust(fam, mu, dis, wobs=refmodel$wobs, wsample=exp(lw[,i]), cl=cl_pred) 
+	  p_sel <- .get_p_clust(fam, mu, dis, aux = refmodel$aux, wobs=refmodel$wobs, wsample=exp(lw[,i]), cl=cl_sel)
+	  p_pred <- .get_p_clust(fam, mu, dis, aux = refmodel$aux, wobs=refmodel$wobs, wsample=exp(lw[,i]), cl=cl_pred) 
 	  
 		if (validate_search) {
 		  # perform selection with the reweighted clusters/samples
@@ -401,7 +414,18 @@ loo_varsel <- function(refmodel, method, nv_max, ns, nc, nspred, ncpred, relax, 
 	  as.search <- !relax && !is.null(spath$beta) && !is.null(spath$alpha)
 	  submodels <- .get_submodels(spath, 0:nv_max, fam, p_pred,
 	                              d_train, intercept, opt$regul, as.search=as.search)
-		d_test <- list(x=matrix(refmodel$x[i,],nrow=1), y=refmodel$y[i], offset=d_train$offset[i], weights=d_train$weights[i])
+	  
+	  if(is_surv_family(fam)) {
+	    
+	    d_test <- list(x=matrix(refmodel$x[i,],nrow=1), y=refmodel$y[i,,drop=F], offset=d_train$offset[i], weights=d_train$weights[i])
+	    submodels <- lapply(submodels, function(sub) { sub$aux <- p_pred$aux
+	    return(sub)
+	    } )
+	    
+	  } else {
+	    d_test <- list(x=matrix(refmodel$x[i,],nrow=1), y=refmodel$y[i], offset=d_train$offset[i], weights=d_train$weights[i])
+	  }
+
 		summaries_sub <- .get_sub_summaries(submodels, d_test, fam)
 
 		for (k in seq_along(summaries_sub)) {

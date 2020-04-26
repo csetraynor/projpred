@@ -74,7 +74,7 @@ get_refmodel.stanreg <- function(object, ...) {
   if ('lmerMod' %in% class(object))
     stop('stan_lmer and stan_glmer are not yet supported.')
   
-  families <- c('gaussian','binomial','poisson')
+  families <- c('gaussian','binomial','poisson','surv')
   if (!(family(object)$family %in% families))
     stop(paste0('Only the following families are currently supported:\n',
                 paste(families, collapse = ', '), '.'))
@@ -82,22 +82,36 @@ get_refmodel.stanreg <- function(object, ...) {
   # fetch the draws
   samp <- as.data.frame(object)
   ndraws <- nrow(samp)
+  fam <- kl_helpers(family(object))
+  if(is_surv_family(fam)) {
+    
+    x <- object$x
+    z <- x
+    ll_args_surv <- rstanarm:::ll_args.stansurv(object)$draws
+
+    } else {
+    
+    x <- rstanarm::get_x(object)
+    # data, family and the predictor matrix x
+    z <- object$data # inputs of the reference model (this contains also the target or a transformation of it, but that shouldn't hurt)
+    ll_args_surv <- NULL
+    rownames(x) <- NULL # ignore the rownames
+    x <- x[, as.logical(attr(x, 'assign')), drop=F] # drop the column of ones
+    attr(x, 'assign') <- NULL
+  }
   
-  # data, family and the predictor matrix x
-  z <- object$data # inputs of the reference model (this contains also the target or a transformation of it, but that shouldn't hurt)
   if (is.null(dim(z)))
     stop('Model was fitted without a \'data\' argument')
-  fam <- kl_helpers(family(object))
-  x <- rstanarm::get_x(object)
-  rownames(x) <- NULL # ignore the rownames
-  x <- x[, as.logical(attr(x, 'assign')), drop=F] # drop the column of ones
-  attr(x, 'assign') <- NULL
+
   
   y <- unname(rstanarm::get_y(object))
   dis <- samp$sigma %ORifNULL% rep(0, ndraws) # TODO: handle other than gaussian likelihoods..
   offset <- object$offset %ORifNULL% rep(0, nobs(object))
   intercept <- as.logical(attr(object$terms,'intercept') %ORifNULL% 0)
-  predfun <- function(zt) t(rstanarm::posterior_linpred(object, newdata=data.frame(zt), transform=T, offset=rep(0,nrow(zt))))
+  predfun <- ifelse( is_stan_surv(object),
+    function(zt) posterior_survlinpred(object, newdata=NULL, transform=T, offset=rep(0,nrow(zt))) ,
+    function(zt) t(rstanarm::posterior_linpred(object, newdata=data.frame(zt), transform=T, offset=rep(0,nrow(zt))))
+  )
   wsample <- rep(1/ndraws, ndraws) # equal sample weights by default
   wobs <- unname(weights(object)) # observation weights
   if (length(wobs)==0) wobs <- rep(1,nrow(z))
@@ -114,7 +128,7 @@ get_refmodel.stanreg <- function(object, ...) {
   }
   
   init_refmodel(z=z, y=y, family=fam, x=x, predfun=predfun, dis=dis, offset=offset,
-                wobs=wobs, wsample=wsample, intercept=intercept, cvfits=NULL, cvfun=cvfun) 
+                wobs=wobs, wsample=wsample, intercept=intercept, cvfits=NULL, cvfun=cvfun, ll_args_surv = ll_args_surv) 
 }
 
 #' @rdname get-refmodel
@@ -232,6 +246,7 @@ get_refmodel.brmsfit <- function(object, ...) {
     })
   }
   
+  
   init_refmodel(
     z = z, y = y, family = fam, x = x, 
     predfun = predfun, dis = dis, offset = offset,
@@ -334,16 +349,15 @@ get_refmodel.brmsfit <- function(object, ...) {
 
 #' @export
 init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=NULL,
-                          wobs=NULL, wsample=NULL, intercept=TRUE, cvfun=NULL, cvfits=NULL,  ...) {
-  
-	n <- NROW(z)
+                          wobs=NULL, wsample=NULL, intercept=TRUE, cvfun=NULL, cvfits=NULL, ll_args_surv = NULL, ...) {
+
+  n <- NROW(z)
 	family <- kl_helpers(family)
 	
 	if (is.null(x))
 		x <- z
 	if (is.null(offset))
 		offset <- rep(0, n)	
-	
 	# y and the observation weights in a standard form
 	target <- .get_standard_y(y, wobs, family)
 	y <- target$y
@@ -390,9 +404,21 @@ init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=N
 		intercept <- TRUE
 	wsample <- wsample/sum(wsample)
 	
+	if(is_surv_family(family)) {
+	  aux <- ll_args_surv$aux
+	  basehaz <- ll_args_surv$basehaz
+	} else {
+	  aux <- rep(0, S) 
+	  basehaz <- NULL
+	}
+	
 	# compute log-likelihood
 	if (proper_model) {
-	  loglik <- t(family$ll_fun(mu,dis,y,wobs))
+	  if(is_surv_family(family)) {
+	    loglik <- t(family$ll_fun(mu_latent,dis,y,wobs, ll_args_surv))
+	  } else {
+	    loglik <- t(family$ll_fun(mu,dis,y,wobs))
+	  }
 	}
 	else
 		loglik <- NULL
@@ -411,7 +437,7 @@ init_refmodel <- function(z, y, family, x=NULL, predfun=NULL, dis=NULL, offset=N
 	
 	refmodel <- list(z=z, x=x, y=y, fam=family, mu=mu, mu_latent = mu_latent, dis=dis, nobs=n, coefnames=coefnames,
 	                 offset=offset, wobs=wobs, wsample=wsample, intercept=intercept,
-	                 predfun=predmu, loglik=loglik, cvfits=cvfits, cvfun=cvfun)
+	                 predfun=predmu, loglik=loglik, cvfits=cvfits, cvfun=cvfun, aux = aux, basehaz = basehaz, alpha = ll_args_surv$alpha)
 	
 	# define the class of the retuned object to be 'refmodel' and additionally 'datafit'
 	# if only the observed data was provided and no actual function for predicting test data
