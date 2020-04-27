@@ -74,6 +74,14 @@ auc <- function(x) {
   return(sum(delta_fpr * tpr) + sum(delta_fpr * delta_tpr) / 2)
 }
 
+cindex <- function(x, ...) {
+  time <- x[,1]
+  status <- x[,2]
+  mu <- x[,3]
+  w <- x[,4]
+  survcomp::concordance.index(mu, time, status, weights = w, ...)$c.index  
+}
+
 bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
   #
   # bootstrap an arbitrary quantity fun that takes the sample x
@@ -137,8 +145,9 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
   if (!inherits(object, c('vsel', 'cvsel')))
     stop('The object is not a variable selection object. Run variable selection first')
 
-  recognized_stats <- c('elpd', 'mlpd','mse', 'rmse', 'acc', 'pctcorr', 'auc')
+  recognized_stats <- c('elpd', 'mlpd','mse', 'rmse', 'acc', 'pctcorr', 'auc','cindex')
   binomial_only_stats <- c('acc', 'pctcorr', 'auc')
+  survival_only_stats <- 'cindex'
   family <- object$family_kl$family
 
   if (is.null(stats))
@@ -148,6 +157,8 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
       stop(sprintf('Statistic \'%s\' not recognized.', stat))
     if (stat %in% binomial_only_stats && family != 'binomial')
       stop('Statistic \'', stat, '\' available only for the binomial family.')
+    if (stat %in% survival_only_stats && !is_surv_family(object) )
+      stop('Statistic \'', stat, '\' available only for the survival family.')
   }
 }
 

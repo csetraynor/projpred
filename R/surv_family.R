@@ -30,7 +30,7 @@ kl_helpers_surv <- function(fam) {
                  aux       = ll_args_surv$aux,
                  intercept = ll_args_surv$alpha,
                  time      = time )
-
+    mu <- t(mu) - c(ll_args_surv$alpha)
     lhaz  <- do.call(rstanarm:::evaluate_log_basehaz,  args) + mu
     lsurv <- do.call(rstanarm:::evaluate_log_basesurv, args) * exp(mu)
     l_lik <- lsurv

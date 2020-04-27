@@ -119,8 +119,6 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
 	sel <- varsel(refmodel, method=method, ns=ns, nc=nc, nspred=nspred, ncpred=ncpred,
 	              relax=relax, nv_max=nv_max, intercept=intercept, penalty=penalty, verbose=verbose, 
 	              lambda_min_ratio=lambda_min_ratio, nlambda=nlambda, regul=regul, latent_factor_dev = latent_factor_dev)
-
-
 	# find out how many of cross-validated iterations select
 	# the same variables as the selection with all the data.
 	ch <- as.matrix(unname(as.data.frame(sel_cv$vind_cv)))
@@ -132,8 +130,6 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
 	  }))
 	}))
 	colnames(pctch)[-1] <- names(sel$vind)
-
-	
 	# create the object to be returned
 	vs <- list()
 	vs$refmodel <- refmodel

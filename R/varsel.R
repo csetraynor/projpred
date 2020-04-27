@@ -141,7 +141,7 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
     } else {
       if(is_surv_family(family_kl)) {
         mu_test <- family_kl$linkfun( refmodel$predfun(d_test$z, d_test$offset) )
-        ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, mu_test , refmodel$aux, c(refmodel$alpha))
+        ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, mu_test , rep(p_sel$aux,nrow(refmodel$alpha)) , c(refmodel$alpha))
         
       } else {
         mu_test <- family_kl$linkfun( refmodel$predfun(d_test$z, d_test$offset) )

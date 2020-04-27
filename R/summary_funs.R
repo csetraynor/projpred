@@ -82,6 +82,9 @@
   summ_ref <- varsel$summaries$ref
   summ_sub <- varsel$summaries$sub
   
+  if(is_surv_family(varsel)){
+    summ_ref$mu <- varsel$family_kl$linkfun(summ_ref$mu)
+  }
   # fetch the mu and lppd for the baseline model
   if (is.null(nfeat_baseline)) {
     # no baseline model, i.e, compute the statistics on the actual (non-relative) scale
@@ -240,6 +243,23 @@ get_stat <- function(mu, lppd, d_test, family, stat, mu.bs=NULL, lppd.bs=NULL,
     } else {
       value <- auc(auc.data)
       value.bootstrap <- bootstrap(auc.data, auc, b=B, seed=seed)
+      value.se <- sd(value.bootstrap, na.rm=TRUE)
+    }
+  } else if (stat == 'cindex') {
+    # ensure weights sum to 1
+    y <- d_test$y
+    cindex.data <- cbind(y, mu, weights)
+    if(!is.null(mu.bs)) {
+      mu.bs[is.na(mu)] <- NA # compute the relative auc using only those points
+      mu[is.na(mu.bs)] <- NA # for which both mu and mu.bs are non-NA
+      cindex.data.bs <- cbind(y, mu.bs, weights)
+      value <- cindex(cindex.data) - cindex(cindex.data.bs)
+      value.bootstrap1 <- bootstrap(cindex.data, cindex, b=B, seed=seed)
+      value.bootstrap2 <- bootstrap(cindex.data.bs, cindex, b=B, seed=seed)
+      value.se <- sd(value.bootstrap1 - value.bootstrap2, na.rm=TRUE)
+    }  else {
+      value <- cindex(cindex.data)
+      value.bootstrap <- bootstrap(cindex.data, cindex, b=B, seed=seed)
       value.se <- sd(value.bootstrap, na.rm=TRUE)
     }
   }
