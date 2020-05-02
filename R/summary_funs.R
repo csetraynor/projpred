@@ -70,7 +70,6 @@
 
 
 .tabulate_stats <- function(varsel, stats, alpha = 0.05, nfeat_baseline=NULL) {
-  
   #
   # Calculates the desired statistics, their standard errors and credible bounds with given
   # credible level alpha based on the variable selection information. If nfeat_baseline
@@ -82,9 +81,9 @@
   summ_ref <- varsel$summaries$ref
   summ_sub <- varsel$summaries$sub
   
-  if(is_surv_family(varsel)){
-    summ_ref$mu <- varsel$family_kl$linkfun(summ_ref$mu)
-  }
+  # if(is_surv_family(varsel)){
+  #   summ_ref$mu <- varsel$family_kl$linkfun(summ_ref$mu)
+  # }
   # fetch the mu and lppd for the baseline model
   if (is.null(nfeat_baseline)) {
     # no baseline model, i.e, compute the statistics on the actual (non-relative) scale

@@ -124,7 +124,6 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
     return(sub)
   } )
   sub <- .get_sub_summaries(p_sub, d_test, family_kl)
-  
   # predictive statistics of the reference model on test data. if no test data are provided, 
   # simply fetch the statistics on the train data
   if ('datafit' %in% class(refmodel)) {
@@ -147,8 +146,6 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
         mu_test <- family_kl$linkfun( refmodel$predfun(d_test$z, d_test$offset) )
         ref <- .weighted_summary_means(d_test, family_kl, refmodel$wsample, mu_test , refmodel$dis, c(refmodel$alpha))
       }
-      
-
     }
   }
   

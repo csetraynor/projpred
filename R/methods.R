@@ -342,7 +342,6 @@ varsel_plot <- function(object, nv_max = NULL, stats = 'elpd', deltas = F, alpha
 #' @export
 varsel_stats <- function(object, nv_max = NULL, stats = 'elpd', type = c('mean','se'), 
                          deltas = F, alpha=0.32, baseline=NULL, ...) {
-
   .validate_vsel_object_stats(object, stats)
   baseline <- .validate_baseline(object$refmode, baseline, deltas)
 

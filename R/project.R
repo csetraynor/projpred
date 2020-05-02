@@ -68,9 +68,18 @@ project <- function(object, nv = NULL, vind = NULL, relax = NULL, ns = NULL, nc 
   if (!inherits(object, c('vsel', 'cvsel')) && is.null(vind))
     stop(paste('The object is not a variable selection object.',
                'Run variable selection first, or provide the variable indices (vind).'))
-
+  if(is_stan_surv(object)) {
+    object$family <- surv_family()
+    latent_factor_dev <- T
+  }
   refmodel <- get_refmodel(object)
-
+  latent_factor_dev <- latent_factor_dev ## for reference here, should default to FALSE?
+  refmodel$fam$latent_factor_dev <- latent_factor_dev
+  family_kl <- refmodel$fam
+  if(is_surv_family(family_kl)) {
+    family_kl$basehaz <- rstanarm:::get_basehaz(object)
+    refmodel$fam <- family_kl
+  }
   if (is.null(relax)) 
   	# use non-relaxed solution for datafits by default
     relax <- ifelse('datafit' %in% class(get_refmodel(object)), FALSE, TRUE)
@@ -134,6 +143,10 @@ project <- function(object, nv = NULL, vind = NULL, relax = NULL, ns = NULL, nc 
 	  class(model) <- 'projection'
 	  return(model)
 	 })
+	proj <- lapply(proj, function(x){
+	  attr(x$vind, "names") <- names(vind)
+	  return(x)
+	})
 
 	# If only one model size, just return the proj instead of a list of projs
 	.unlist_proj(proj)
