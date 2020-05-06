@@ -78,8 +78,10 @@ cv_varsel <- function(fit,  method = NULL, cv_method = NULL,
 	refmodel$fam$latent_factor_dev <- latent_factor_dev
 	family_kl <- refmodel$fam
 	if(is_surv_family(family_kl)) {
-	  family_kl$basehaz <- rstanarm:::get_basehaz(fit)
-	  refmodel$fam <- family_kl
+	  if(is_stan_surv(fit)) {
+	    family_kl$basehaz <- rstanarm:::get_basehaz(fit)
+	    refmodel$fam <- family_kl
+	  }
 	}
 	# resolve the arguments similar to varsel
 	args <- parseargs_varsel(refmodel, method, relax, intercept, nv_max, nc, ns, ncpred, nspred)

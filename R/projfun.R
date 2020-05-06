@@ -2,7 +2,6 @@
 #
 
 project_gaussian <- function(vind, p_ref, d_train, family_kl, intercept, regul = 1e-12) {
-
     x <- d_train$x
     dis <- p_ref$dis
     

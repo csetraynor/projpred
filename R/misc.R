@@ -79,7 +79,27 @@ cindex <- function(x, ...) {
   status <- x[,2]
   mu <- x[,3]
   w <- x[,4]
-  survcomp::concordance.index(mu, time, status, weights = w, ...)$c.index  
+  y <- survival::Surv(time, status)
+  cindex <- survival:::survConcordance.fit(y = y, x = mu, weight = w)
+  agree <- cindex[1]
+  disagree <- cindex[2]
+  tied <- cindex[3]
+  (agree + tied/2) / (agree + disagree + tied)
+  # (agree-disagree)/(agree+disagree)
+}
+
+cindex_gamma <- function(x, ...) {
+  time <- x[,1]
+  status <- x[,2]
+  mu <- x[,3]
+  w <- x[,4]
+  y <- survival::Surv(time, status)
+  cindex <- survival:::survConcordance.fit(y = y, x = mu, weight = w)
+  agree <- cindex[1]
+  disagree <- cindex[2]
+  tied <- cindex[3]
+  #(agree + tied/2) / (agree + disagree + tied)
+  (agree-disagree)/(agree+disagree)
 }
 
 bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
@@ -145,9 +165,9 @@ bootstrap <- function(x, fun=mean, b=1000, oobfun=NULL, seed=NULL, ...) {
   if (!inherits(object, c('vsel', 'cvsel')))
     stop('The object is not a variable selection object. Run variable selection first')
 
-  recognized_stats <- c('elpd', 'mlpd','mse', 'rmse', 'acc', 'pctcorr', 'auc','cindex')
+  recognized_stats <- c('elpd', 'mlpd','mse', 'rmse', 'acc', 'pctcorr', 'auc','cindex','cindex_gamma')
   binomial_only_stats <- c('acc', 'pctcorr', 'auc')
-  survival_only_stats <- 'cindex'
+  survival_only_stats <- c('cindex', 'cindex_gamma')
   family <- object$family_kl$family
 
   if (is.null(stats))

@@ -75,7 +75,6 @@
   # credible level alpha based on the variable selection information. If nfeat_baseline
   # is given, then compute the statistics relative to the baseline model with that size
   # (nfeat_baseline = Inf means reference model).
-  
   stat_tab <- data.frame()
  
   summ_ref <- varsel$summaries$ref
@@ -259,6 +258,23 @@ get_stat <- function(mu, lppd, d_test, family, stat, mu.bs=NULL, lppd.bs=NULL,
     }  else {
       value <- cindex(cindex.data)
       value.bootstrap <- bootstrap(cindex.data, cindex, b=B, seed=seed)
+      value.se <- sd(value.bootstrap, na.rm=TRUE)
+    }
+  } else if (stat == 'cindex_gamma') {
+    # ensure weights sum to 1
+    y <- d_test$y
+    cindex.data <- cbind(y, mu, weights)
+    if(!is.null(mu.bs)) {
+      mu.bs[is.na(mu)] <- NA # compute the relative auc using only those points
+      mu[is.na(mu.bs)] <- NA # for which both mu and mu.bs are non-NA
+      cindex.data.bs <- cbind(y, mu.bs, weights)
+      value <- cindex_gamma(cindex.data) - cindex_gamma(cindex.data.bs)
+      value.bootstrap1 <- bootstrap(cindex.data, cindex_gamma, b=B, seed=seed)
+      value.bootstrap2 <- bootstrap(cindex.data.bs, cindex_gamma, b=B, seed=seed)
+      value.se <- sd(value.bootstrap1 - value.bootstrap2, na.rm=TRUE)
+    }  else {
+      value <- cindex_gamma(cindex.data)
+      value.bootstrap <- bootstrap(cindex.data, cindex_gamma, b=B, seed=seed)
       value.se <- sd(value.bootstrap, na.rm=TRUE)
     }
   }

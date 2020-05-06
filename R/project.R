@@ -63,7 +63,7 @@
 #'
 #' @export
 project <- function(object, nv = NULL, vind = NULL, relax = NULL, ns = NULL, nc = NULL, 
-                    intercept = NULL, seed = NULL, regul=1e-4, ...) {
+                    intercept = NULL, seed = NULL, regul=1e-4, latent_factor_dev = FALSE, ...) {
 
   if (!inherits(object, c('vsel', 'cvsel')) && is.null(vind))
     stop(paste('The object is not a variable selection object.',

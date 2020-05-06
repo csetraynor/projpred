@@ -95,7 +95,6 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
   ncpred <- args$ncpred
   nspred <- args$nspred
 
-  
   # training and test data
   d_train <- .get_traindata(refmodel)
   if (is.null(d_test)) {
@@ -123,6 +122,7 @@ varsel <- function(object, d_test = NULL, method = NULL, ns = NULL, nc = NULL,
     sub$aux <- p_pred$aux
     return(sub)
   } )
+
   sub <- .get_sub_summaries(p_sub, d_test, family_kl)
   # predictive statistics of the reference model on test data. if no test data are provided, 
   # simply fetch the statistics on the train data

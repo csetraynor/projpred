@@ -3,7 +3,7 @@
 
 search_forward1 <- function(p_ref, d_train, family, intercept, nv_max,
                            verbose, opt) {
-  
+
   # predictive mean and variance of the reference model (with parameters integrated out)
   latent_factor_dev <- opt$latent_factor_dev
   if(latent_factor_dev){
